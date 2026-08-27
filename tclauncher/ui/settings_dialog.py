@@ -70,6 +70,9 @@ class SettingsDialog(QDialog):
         self.mangohud_check = QCheckBox("Enable MangoHud overlay")
         self.mangohud_check.setChecked(self.config.use_mangohud)
         form.addRow(self.mangohud_check)
+        self.discord_check = QCheckBox("Show game status on Discord")
+        self.discord_check.setChecked(self.config.discord_presence)
+        form.addRow(self.discord_check)
 
         # Env vars table
         self.env_table = QTableWidget(0, 2)
@@ -167,6 +170,7 @@ class SettingsDialog(QDialog):
         self.config.run_args = run_args
         self.config.use_gamemode = self.gamemode_check.isChecked()
         self.config.use_mangohud = self.mangohud_check.isChecked()
+        self.config.discord_presence = self.discord_check.isChecked()
         self.config.env_vars = env_vars
         self.config.save()
         self.accept()

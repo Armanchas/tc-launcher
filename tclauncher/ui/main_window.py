@@ -20,6 +20,7 @@ from ..backend import BackendClient, ServerDiscoveryStatus
 from ..config import LAUNCHER_USERDIR, PROTOCOL_VERSION, ConfigManager
 from ..desktop import open_path
 from ..mods import ModManager
+from ..presence import start_presence
 from ..runner import GAME_LOG, GameRunner, steam_preflight_issue
 from ..version import APP_VERSION
 from .mods_dialog import ModsDialog
@@ -53,6 +54,7 @@ class MainWindow(QMainWindow):
         self.session_manager = SessionManager(config, self.backend)
         self.mod_manager = ModManager(config, self.backend)
         self.runner = GameRunner(config)
+        self._presence = None
 
         self._logged_in = False
         self._server_online = False
@@ -420,6 +422,7 @@ class MainWindow(QMainWindow):
             logger.exception(e)
             self._launch_failed(str(e))
             return
+        self._presence = start_presence(self.config)
         self._launch_started_at = time.monotonic()
         self._update_primary_enabled()
         if first_run:
@@ -444,6 +447,9 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _on_game_exit(self):
+        if self._presence is not None:
+            self._presence.stop()
+            self._presence = None
         self.showNormal()
         elapsed = time.monotonic() - getattr(self, "_launch_started_at", 0.0)
         self._status_hold = False

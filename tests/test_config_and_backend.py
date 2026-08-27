@@ -126,3 +126,21 @@ def test_failed_save_preserves_existing_config(tmp_path, monkeypatch):
 
     assert json.loads(path.read_text())["session_id"] == "keep-me"
     assert not (tmp_path / "config.json.tmp").exists()
+
+
+def test_discord_presence_defaults_on_and_round_trips(tmp_path):
+    from tclauncher.config import ConfigManager
+
+    path = str(tmp_path / "config.json")
+    c = ConfigManager(path)
+    assert c.discord_presence is True
+    assert c.discord_client_id == ""
+
+    c.discord_presence = False
+    c.discord_client_id = "123456789012345678"
+    c.save()
+
+    reloaded = ConfigManager(path)
+    reloaded.load()
+    assert reloaded.discord_presence is False
+    assert reloaded.discord_client_id == "123456789012345678"

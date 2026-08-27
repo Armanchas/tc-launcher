@@ -46,10 +46,13 @@ def test_second_map_display_name():
     assert p.map_name == "Crescent Falls"
 
 
-def test_community_deathmatch_map_is_recognised():
+def test_community_deathmatch_map_is_a_mode_not_a_place():
+    """The deathmatch map has no in-fiction name, so it reads as a mode."""
     p = derive(LAUNCHING, MAP_LINE.format("TestMap_DeathMatch_P"))
     assert p.key == "dropping_in"
-    assert p.map_name == "Deathmatch"
+    assert p.details == "Joining Deathmatch"
+    assert p.map_name == ""
+    assert p.mode_map == "Deathmatch"
 
 
 def test_match_in_progress_keeps_the_map_name():

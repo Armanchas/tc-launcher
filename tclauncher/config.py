@@ -38,6 +38,8 @@ class ConfigManager:
         self.env_vars: dict[str, str] = {}
         self.use_gamemode: bool = False
         self.use_mangohud: bool = False
+        self.discord_presence: bool = True
+        self.discord_client_id: str = ""
 
     def load(self):
         if os.path.exists(self.config_file):
@@ -60,6 +62,8 @@ class ConfigManager:
             self.env_vars = data.get("env_vars", {})
             self.use_gamemode = data.get("use_gamemode", False)
             self.use_mangohud = data.get("use_mangohud", False)
+            self.discord_presence = data.get("discord_presence", True)
+            self.discord_client_id = data.get("discord_client_id", "")
         else:
             self.save()
 
@@ -79,6 +83,8 @@ class ConfigManager:
             "env_vars": self.env_vars,
             "use_gamemode": self.use_gamemode,
             "use_mangohud": self.use_mangohud,
+            "discord_presence": self.discord_presence,
+            "discord_client_id": self.discord_client_id,
         }
         # Write-then-rename so a crash mid-write can't corrupt the config.
         tmp_path = self.config_file + ".tmp"
