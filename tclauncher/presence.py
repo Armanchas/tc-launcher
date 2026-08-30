@@ -97,10 +97,12 @@ _IN_MATCH_LABEL = "In Match"
 FLAVOUR: dict[str, tuple[str, ...]] = {
     "in_station": (
         "Doing Station things",
-        "Talking to NPCs",
+        "Arm wrestling the Co-bots",
         "Vibing to the Korolev theme",
         "Getting unfoamed",
         "Going out of bounds",
+        "Waiting for a match",
+        "Drinking at the Lucky Leafman",
     ),
     "in_match": (
         "On my way to steal your minerals",
@@ -108,11 +110,14 @@ FLAVOUR: dict[str, tuple[str, ...]] = {
         "We need more minerals than before",
         "Looking for a pactmate",
         "Investing in refiners",
+        "Camping batteries",
+        "Not clearing evac",
     ),
     "deathmatch": (
         "No minerals, just violence",
         "Settling this the old-fashioned way",
-        "Back in a second",
+        "Stealing kills",
+        "Getting third-partied",
         "Working on the K/D",
     ),
 }

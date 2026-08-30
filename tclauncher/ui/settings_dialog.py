@@ -60,7 +60,7 @@ class SettingsDialog(QDialog):
 
         # Launch flags
         self.args_edit = QLineEdit(shlex.join(self.config.run_args))
-        self.args_edit.setPlaceholderText("Extra game command-line flags, e.g. -log -nosplash")
+        self.args_edit.setPlaceholderText("Extra game command-line flags, e.g. -log")
         form.addRow("Launch flags:", self.args_edit)
 
         # Toggles
