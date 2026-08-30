@@ -15,6 +15,7 @@ and port. `PreLoadingNewMap` is address-free.
 
 import logging
 import os
+import random
 import re
 import threading
 import time
@@ -40,10 +41,12 @@ MAPS: dict[str, str] = {
     "MP_Map02_P": "Crescent Falls",        # MS_MapTitle_Map02
 }
 
-# Maps that are their own state rather than a match.
+# Maps that are their own state rather than a match, as
+# (presence key, details, flavour pool). An empty pool means the state has no
+# flavour line of its own.
 _MAP_STATES = {
     "Login_P": ("signing_in", "Signing in", ""),
-    "Station_P": ("in_station", "In Station", "Doing Station things"),
+    "Station_P": ("in_station", "In Station", "in_station"),
     "Tut_Sandbox_P": ("tutorial", "In the tutorial", ""),
 }
 
@@ -81,9 +84,38 @@ _SQUAD_MODES = {
 # hard guarantee.
 SQUAD_MAX = 4
 
-# Presence text mirrors the game's own Generic_DiscordRP_* strings so the
-# Windows (in-game) and Linux (launcher) producers render identically.
-_IN_MATCH = ("In Match", "On my way to steal your minerals")
+_IN_MATCH_LABEL = "In Match"
+
+# The second presence line ("state") is drawn from a pool, re-rolled each time
+# the player enters that state, so a session does not read the same all evening.
+# The game's own Generic_DiscordRP_* string leads each pool, so the default --
+# what derive() produces on its own, and what a future Windows producer would
+# show -- is unchanged. Community-written lines follow.
+#
+# Keep lines short: Discord caps "state" at 128 bytes and the squad marker
+# shares the line.
+FLAVOUR: dict[str, tuple[str, ...]] = {
+    "in_station": (
+        "Doing Station things",
+        "Talking to NPCs",
+        "Vibing to the Korolev theme",
+        "Getting unfoamed",
+        "Going out of bounds",
+    ),
+    "in_match": (
+        "On my way to steal your minerals",
+        "In a little game -_-",
+        "We need more minerals than before",
+        "Looking for a pactmate",
+        "Investing in refiners",
+    ),
+    "deathmatch": (
+        "No minerals, just violence",
+        "Settling this the old-fashioned way",
+        "Back in a second",
+        "Working on the K/D",
+    ),
+}
 
 LARGE_IMAGE_KEY = "the_cycle"
 
@@ -117,6 +149,10 @@ class Presence:
     # Set when the map itself names the mode (e.g. Deathmatch), meaning there
     # is no place name to show.
     mode_map: str = ""
+    # Which FLAVOUR pool this state's second line is drawn from ("" = none).
+    # Set by derive(); the actual line is chosen by the session, so derive()
+    # itself stays deterministic and the golden replay keeps working.
+    flavour: str = ""
 
 
 LAUNCHING = Presence("launching", "Starting up")
@@ -130,9 +166,34 @@ def _context(p: Presence) -> dict:
             "mode_map": p.mode_map}
 
 
-def _squad_suffix(p: Presence) -> str:
+def _squad_marker(p: Presence) -> str:
     """Text marker for squad play, used when no member count is available."""
-    return " · In a squad" if p.in_squad and p.squad_size < 2 else ""
+    return "In a squad" if p.in_squad and p.squad_size < 2 else ""
+
+
+def _state_line(flavour_text: str, p: Presence) -> str:
+    """The second presence line: the flavour text plus any squad marker."""
+    return " · ".join(part for part in (flavour_text, _squad_marker(p)) if part)
+
+
+def _default_flavour(pool: str) -> str:
+    """The game's own line for `pool` -- what derive() uses on its own."""
+    lines = FLAVOUR.get(pool)
+    return lines[0] if lines else ""
+
+
+def pick_flavour(pool: str, avoid: str = "", rng=None) -> str:
+    """A random line from `pool`, never `avoid` unless it is the only one."""
+    lines = FLAVOUR.get(pool)
+    if not lines:
+        return ""
+    choices = [line for line in lines if line != avoid] or list(lines)
+    return (rng or random).choice(choices)
+
+
+def with_flavour(p: Presence, text: str) -> Presence:
+    """`p` with its state line rebuilt from `text` and the current squad."""
+    return replace(p, state=_state_line(text, p))
 
 
 def _match_label(p: Presence) -> str:
@@ -140,7 +201,7 @@ def _match_label(p: Presence) -> str:
     name = _MODE_NAMES.get(p.mode, "")
     if p.ranked:
         return f"Ranked {name}" if name else "Ranked Match"
-    return name or _IN_MATCH[0]
+    return name or _IN_MATCH_LABEL
 
 
 def _for_map(map_id: str, current: Presence) -> Presence:
@@ -148,15 +209,16 @@ def _for_map(map_id: str, current: Presence) -> Presence:
         # Hub maps end a match: drop the mode so the next match cannot inherit
         # a stale one. Squad membership is not part of a match -- it persists
         # until the player actually leaves, which PrintSquad reports.
-        key, details, state = _MAP_STATES[map_id]
-        return Presence(key, details, state + _squad_suffix(current),
-                        in_squad=current.in_squad, squad_size=current.squad_size)
+        key, details, pool = _MAP_STATES[map_id]
+        nxt = Presence(key, details, "", flavour=pool,
+                       in_squad=current.in_squad, squad_size=current.squad_size)
+        return with_flavour(nxt, _default_flavour(pool))
     mode_name = _MODE_MAPS.get(map_id)
     if mode_name:
         # The map *is* the mode; it has no place name to show.
-        return Presence("dropping_in", f"Joining {mode_name}",
-                        _squad_suffix(current).lstrip(" ·").strip(), "",
-                        **{**_context(current), "mode_map": mode_name})
+        nxt = Presence("dropping_in", f"Joining {mode_name}", "", "",
+                       **{**_context(current), "mode_map": mode_name})
+        return with_flavour(nxt, "")
     name = MAPS.get(map_id)
     if not name:
         # Never echo an unrecognised id into presence -- log it instead, so a
@@ -202,13 +264,16 @@ def derive(current: Presence | None, line: str) -> Presence | None:
             mode_name = current.mode_map
             if mode_name:
                 details = f"Playing {mode_name}"
+                pool = "deathmatch" if mode_name == "Deathmatch" else ""
             else:
                 # The map name goes in the text, never only in artwork metadata.
                 label = _match_label(current)
                 details = f"{label} — {name}" if name else label
-            nxt = Presence("in_match", details,
-                           _IN_MATCH[1] + _squad_suffix(current), name,
-                           **_context(current))
+                pool = "in_match"
+            nxt = with_flavour(
+                Presence("in_match", details, "", name,
+                         flavour=pool, **_context(current)),
+                _default_flavour(pool))
         elif state in ("MatchEnding", "MatchOver"):
             name = current.map_name
             details = f"Match over — {name}" if name else "Match over"
@@ -258,8 +323,15 @@ class PresenceSession:
     """
 
     def __init__(self, client_id, log_path, ipc=None, poll_interval=1.0,
-                 min_update_interval=15.0):
+                 min_update_interval=15.0, pick=pick_flavour):
         self.client_id = client_id
+        # Injected so tests can make the flavour line deterministic.
+        self._pick = pick
+        self._flavour_text = ""
+        # Last line drawn from each pool, so re-entering a state does not
+        # repeat it. Kept per pool: the pool-less states in between (dropping
+        # in, match over) would otherwise wipe the memory every time.
+        self._last_flavour: dict[str, str] = {}
         self.log_path = log_path
         self.ipc = ipc if ipc is not None else DiscordIPC()
         self.poll_interval = poll_interval
@@ -314,7 +386,16 @@ class PresenceSession:
                     # timer; matchmaking and squad lines update context alone.
                     if nxt.key != self.current.key:
                         self._started_at = int(time.time())
-                    self.current = nxt
+                    # Draw a new flavour line only when the state actually
+                    # changes pool, so it cannot reshuffle mid-match; then
+                    # rebuild the line so a squad joining or filling shows up.
+                    if nxt.flavour != self.current.flavour:
+                        self._flavour_text = self._pick(
+                            nxt.flavour,
+                            avoid=self._last_flavour.get(nxt.flavour, ""))
+                        if nxt.flavour:
+                            self._last_flavour[nxt.flavour] = self._flavour_text
+                    self.current = with_flavour(nxt, self._flavour_text)
                     self._pending = True
         self._flush()
 

@@ -166,11 +166,11 @@ def test_updates_are_coalesced_by_the_rate_limit(tmp_path):
 
 
 MM_LINE = ("[2026.08.26-17.31.21:585][165]LogYMatchmakingController: "
-           "EnterMatchmaking | Map: '', GameMode: 'SQUADLOOP', IsRanked: 0\n")
+           "EnterMatchmaking | Map: '', GameMode: '{}', IsRanked: 0\n")
 
 
-def test_context_only_change_does_not_resend_or_restart_the_timer(tmp_path):
-    """Matchmaking updates context but not visible text: no duplicate update."""
+def _station_then(tmp_path, line):
+    """Sit in the Station, then feed one more line. Returns (session, ipc)."""
     log = tmp_path / "Prospect.log"
     log.write_text("")
     ipc = FakeIPC()
@@ -180,12 +180,27 @@ def test_context_only_change_does_not_resend_or_restart_the_timer(tmp_path):
         f.write(MAP_LINE.format("Station_P"))
     s._pump()
     assert len(ipc.activities) == 1
-    started = s._started_at
-
     with open(log, "a") as f:
-        f.write(MM_LINE)
+        f.write(line)
     s._pump()
-    # Context captured, but nothing new sent and the elapsed timer is intact.
-    assert s.current.in_squad is True
+    return s, ipc
+
+
+def test_context_only_change_does_not_resend_or_restart_the_timer(tmp_path):
+    """Matchmaking updates context but not visible text: no duplicate update."""
+    s, ipc = _station_then(tmp_path, MM_LINE.format("LOOP"))
+    started = s._started_at
+    assert s.current.mode == "LOOP"
     assert len(ipc.activities) == 1
     assert s._started_at == started
+
+
+def test_joining_a_squad_updates_the_line_without_restarting_the_timer(tmp_path):
+    """A squad marker is visible text, so it sends -- but the state is the same."""
+    s, ipc = _station_then(tmp_path, MM_LINE.format("SQUADLOOP"))
+    assert s.current.in_squad is True
+    assert len(ipc.activities) == 2
+    assert ipc.activities[-1]["state"].endswith("· In a squad")
+    assert ipc.activities[-1]["details"] == ipc.activities[0]["details"]
+    assert (ipc.activities[-1]["timestamps"]["start"]
+            == ipc.activities[0]["timestamps"]["start"])
