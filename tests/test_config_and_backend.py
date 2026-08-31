@@ -1,7 +1,7 @@
 import json
 
 from tclauncher.backend import BackendClient, ServerDiscoveryStatus
-from tclauncher.config import ConfigManager
+from tclauncher.config import DEFAULT_DISCORD_CLIENT_ID, ConfigManager
 
 
 def test_config_roundtrip(tmp_path):
@@ -134,7 +134,7 @@ def test_discord_presence_defaults_on_and_round_trips(tmp_path):
     path = str(tmp_path / "config.json")
     c = ConfigManager(path)
     assert c.discord_presence is True
-    assert c.discord_client_id == ""
+    assert c.discord_client_id == DEFAULT_DISCORD_CLIENT_ID
 
     c.discord_presence = False
     c.discord_client_id = "123456789012345678"
@@ -144,3 +144,27 @@ def test_discord_presence_defaults_on_and_round_trips(tmp_path):
     reloaded.load()
     assert reloaded.discord_presence is False
     assert reloaded.discord_client_id == "123456789012345678"
+
+
+def test_a_fresh_config_has_a_usable_discord_client_id(tmp_path):
+    c = ConfigManager(config_file=str(tmp_path / "config.json"))
+    assert c.discord_client_id == DEFAULT_DISCORD_CLIENT_ID
+    assert DEFAULT_DISCORD_CLIENT_ID.isdigit()
+
+
+def test_an_empty_stored_id_falls_back_to_the_default(tmp_path):
+    """Existing Linux configs already have this key on disk, often empty.
+    An empty string must not beat the shipped default."""
+    path = tmp_path / "config.json"
+    path.write_text('{"discord_client_id": ""}')
+    c = ConfigManager(config_file=str(path))
+    c.load()
+    assert c.discord_client_id == DEFAULT_DISCORD_CLIENT_ID
+
+
+def test_a_user_set_id_still_wins(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"discord_client_id": "999"}')
+    c = ConfigManager(config_file=str(path))
+    c.load()
+    assert c.discord_client_id == "999"

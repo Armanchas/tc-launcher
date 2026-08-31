@@ -20,6 +20,11 @@ GAME_LOG = os.path.join(LAUNCHER_USERDIR, "game.log")
 
 GAME_EXE_RELPATH = os.path.join("Prospect", "Binaries", "Win64", "Prospect-Win64-Shipping.exe")
 
+# Our Discord application id. Public and safe to commit -- no secret, no OAuth.
+# Shipped as a default so Windows players (who never hand-edit config.json) get
+# presence without configuration.
+DEFAULT_DISCORD_CLIENT_ID = "1542185056418660362"
+
 
 class ConfigManager:
     def __init__(self, config_file: str = CONFIG_FILE):
@@ -40,7 +45,7 @@ class ConfigManager:
         self.use_gamemode: bool = False
         self.use_mangohud: bool = False
         self.discord_presence: bool = True
-        self.discord_client_id: str = ""
+        self.discord_client_id: str = DEFAULT_DISCORD_CLIENT_ID
 
     def load(self):
         if os.path.exists(self.config_file):
@@ -64,7 +69,11 @@ class ConfigManager:
             self.use_gamemode = data.get("use_gamemode", False)
             self.use_mangohud = data.get("use_mangohud", False)
             self.discord_presence = data.get("discord_presence", True)
-            self.discord_client_id = data.get("discord_client_id", "")
+            # An empty stored value means "unset", not "disabled" -- existing
+            # Linux configs already carry this key, often blank.
+            self.discord_client_id = (
+                data.get("discord_client_id", "") or DEFAULT_DISCORD_CLIENT_ID
+            )
         else:
             self.save()
 
