@@ -44,6 +44,23 @@ def diagnostic_lines(env: dict, game_exe_dir: str) -> list[str]:
     return _runner_module().diagnostic_lines(env, game_exe_dir)
 
 
+# The path after AppData/Local is identical on both platforms; only the prefix
+# differs. Kept in presence.py as GAME_LOG_RELPATH's tail.
+_LOG_TAIL = os.path.join("Prospect", "Saved", "Logs", "Prospect.log")
+
+
+def game_log_path(config) -> str:
+    """The game's UE log for this platform."""
+    if IS_WINDOWS:
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser(
+            os.path.join("~", "AppData", "Local")
+        )
+        return os.path.join(base, _LOG_TAIL)
+    prefix = os.path.expanduser(config.wine_prefix)
+    return os.path.join(prefix, "drive_c", "users", "steamuser",
+                        "AppData", "Local", _LOG_TAIL)
+
+
 class _SocketConn:
     """Discord IPC over a Unix socket (Linux/macOS)."""
 

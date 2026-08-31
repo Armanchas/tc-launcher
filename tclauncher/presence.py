@@ -315,9 +315,10 @@ GAME_LOG_RELPATH = os.path.join(
 )
 
 
-def game_log_path(wine_prefix: str) -> str:
-    """The game's UE log inside the configured prefix."""
-    return os.path.join(os.path.expanduser(wine_prefix), GAME_LOG_RELPATH)
+def game_log_path(config) -> str:
+    """The game's UE log. Delegates: Windows has no wine prefix."""
+    from .platforms import game_log_path as _path
+    return _path(config)
 
 
 class PresenceSession:
@@ -417,7 +418,11 @@ class PresenceSession:
             self._inode = stat.st_ino
             return
         # The game recreates or truncates the log each launch.
-        if stat.st_ino != self._inode or stat.st_size < self._file.tell():
+        # A zero inode means "unknown" -- Windows synthesises st_ino from the
+        # NTFS file index and it can be 0, which would make two different logs
+        # compare equal and replay stale state. The size check carries it.
+        rotated = (stat.st_ino and self._inode and stat.st_ino != self._inode)
+        if rotated or stat.st_size < self._file.tell():
             self._close_file()
             self._file = open(self.log_path, "r", encoding="utf-8", errors="replace")
             self._inode = stat.st_ino
@@ -470,7 +475,7 @@ def start_presence(config) -> "PresenceSession | None":
         logger.debug("Discord presence enabled but no client id configured")
         return None
     try:
-        session = PresenceSession(client_id, game_log_path(config.wine_prefix))
+        session = PresenceSession(client_id, game_log_path(config))
         session.start()
         return session
     except Exception:

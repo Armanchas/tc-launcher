@@ -1,6 +1,10 @@
 import os
 
-from tclauncher.presence import PresenceSession, game_log_path
+import pytest
+
+from tclauncher import platforms
+from tclauncher.config import ConfigManager
+from tclauncher.presence import GAME_LOG_RELPATH, PresenceSession, game_log_path
 
 MAP_LINE = "[2026.08.25-20.11.14:600][698]LogYGameInstance: PreLoadingNewMap | new map '{}'.\n"
 
@@ -35,9 +39,13 @@ def _session(tmp_path, ipc, name="Prospect.log"):
     )
 
 
-def test_game_log_path_is_derived_from_the_prefix():
-    path = game_log_path("/home/u/.tclauncher/prefix")
-    assert path.startswith("/home/u/.tclauncher/prefix")
+@pytest.mark.skipif(platforms.IS_WINDOWS,
+                    reason="Linux resolves the log inside a wine prefix; Windows has none")
+def test_game_log_path_is_derived_from_the_prefix(tmp_path):
+    config = ConfigManager(config_file=str(tmp_path / "config.json"))
+    config.wine_prefix = str(tmp_path / "prefix")
+    path = game_log_path(config)
+    assert path.startswith(str(tmp_path / "prefix"))
     assert path.endswith(os.path.join("Prospect", "Saved", "Logs", "Prospect.log"))
 
 
@@ -204,3 +212,51 @@ def test_joining_a_squad_updates_the_line_without_restarting_the_timer(tmp_path)
     assert ipc.activities[-1]["details"] == ipc.activities[0]["details"]
     assert (ipc.activities[-1]["timestamps"]["start"]
             == ipc.activities[0]["timestamps"]["start"])
+
+
+def test_log_path_ends_with_the_shared_relative_tail(tmp_path):
+    """The tail after AppData/Local is identical on both platforms."""
+    config = ConfigManager(config_file=str(tmp_path / "config.json"))
+    path = platforms.game_log_path(config)
+    assert path.endswith(os.path.join("Prospect", "Saved", "Logs", "Prospect.log"))
+
+
+@pytest.mark.skipif(platforms.IS_WINDOWS,
+                    reason="Linux resolves the log inside a wine prefix; Windows has none")
+def test_linux_log_path_is_inside_the_configured_prefix(tmp_path):
+    config = ConfigManager(config_file=str(tmp_path / "config.json"))
+    config.wine_prefix = str(tmp_path / "prefix")
+    path = platforms.game_log_path(config)
+    assert path.startswith(str(tmp_path / "prefix"))
+    assert GAME_LOG_RELPATH in path
+
+
+def test_a_zero_inode_does_not_make_two_logs_look_identical(tmp_path, monkeypatch):
+    """Windows synthesises st_ino from the NTFS file index and it can be 0.
+    Trusting a 0 would replay a stale log as live state."""
+    log = tmp_path / "Prospect.log"
+    log.write_text("")
+    ipc = FakeIPC()
+    s = _session(tmp_path, ipc)
+    s._pump()  # opens the file at EOF -- this handle must survive the next pump
+    with open(log, "a") as f:
+        f.write(MAP_LINE.format("Station_P"))
+    s._pump()
+    assert s.current.key == "in_station"
+    handle_before = s._file
+
+    real_stat = os.stat
+
+    def zero_inode_stat(path, *a, **kw):
+        st = real_stat(path, *a, **kw)
+        return os.stat_result((st.st_mode, 0) + tuple(st)[2:])
+
+    monkeypatch.setattr(os, "stat", zero_inode_stat)
+    # A zero inode must read as "unknown", not as "different file". Asserting on
+    # the handle, not on state: a spurious reopen re-reads from offset 0 and
+    # lands on the same state anyway, so state alone cannot catch this bug.
+    with open(log, "a") as f:
+        f.write(MAP_LINE.format("MP_Map01_P"))
+    s._pump()
+    assert s._file is handle_before, "a zero inode triggered a spurious reopen"
+    assert s.current.key == "dropping_in"
