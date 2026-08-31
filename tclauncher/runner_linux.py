@@ -16,8 +16,9 @@ import threading
 from dataclasses import dataclass
 from typing import Callable
 
-from .config import GAME_LOG, LAUNCHER_USERDIR, ConfigManager
+from .config import GAME_LOG, ConfigManager
 from .desktop import clean_child_env
+from .diagnostics import format_launch_diagnostics, steam_login_summary
 
 logger = logging.getLogger(__name__)
 
@@ -192,25 +193,6 @@ def steam_preflight_issue(config_compat: str = "") -> str | None:
     return None
 
 
-# Env keys worth capturing for Steam/Proton/container triage. Prefix-matched
-# keys plus a few exact ones. Allowlisted (not a full os.environ dump) so we
-# never write unrelated secrets/tokens into a log the user will share.
-_DIAG_ENV_PREFIXES = ("STEAM", "PROTON", "PRESSURE_VESSEL", "UMU", "DXVK",
-                      "VKD3D", "WINE")
-_DIAG_ENV_KEYS = ("GAMEID", "STORE", "XDG_RUNTIME_DIR", "LD_PRELOAD",
-                  "MANGOHUD", "ENABLE_GAMEMODE", "LANG")
-
-
-def relevant_env(env: dict) -> list[str]:
-    """Sorted 'KEY=VALUE' lines for the allowlisted Steam/Proton/container env
-    vars present in `env`. Allowlisted to avoid leaking unrelated secrets."""
-    keys = {k for k in _DIAG_ENV_KEYS if k in env}
-    for k in env:
-        if any(k.startswith(p) for p in _DIAG_ENV_PREFIXES):
-            keys.add(k)
-    return [f"{k}={env[k]}" for k in sorted(keys)]
-
-
 def system_summary() -> str:
     """Distro + kernel — CachyOS vs other, and kernel matters for
     pressure-vessel / ntsync behaviour."""
@@ -296,29 +278,6 @@ def install_steam_bridge(steam_path: str, wineprefix: str) -> str:
     return summary
 
 
-def steam_login_summary(steam_path: str) -> str:
-    """Best-effort read of loginusers.vdf: account count, most-recent flag, and
-    a warning if any account has WantsOfflineMode=1 (offline mode blocks auth).
-    Deliberately logs no account/persona names (PII)."""
-    if not steam_path:
-        return "unknown (no Steam path)"
-    vdf = os.path.join(steam_path, "config", "loginusers.vdf")
-    try:
-        with open(vdf) as f:
-            text = f.read()
-    except OSError:
-        return "no loginusers.vdf (Steam never logged in on this install?)"
-    import re
-
-    compact = re.sub(r"\s+", "", text)
-    n = len(re.findall(r'"\d{17}"', text))
-    most_recent = "yes" if '"MostRecent""1"' in compact else "no"
-    parts = [f"{n} account(s)", f"most-recent set: {most_recent}"]
-    if '"WantsOfflineMode""1"' in compact:
-        parts.append("WARNING: an account has WantsOfflineMode=1 (blocks auth)")
-    return ", ".join(parts)
-
-
 def steam_process_hint() -> str | None:
     """When no Steam pid file is readable, locate a running steam via pgrep +
     /proc so the log still shows which binary is running."""
@@ -336,17 +295,9 @@ def steam_process_hint() -> str | None:
     return None
 
 
-def format_launch_diagnostics(env: dict, game_exe_dir: str) -> str:
-    """A human-readable env snapshot for the top of game.log, so a failing
-    tester's log alone pins down Steam-auth problems instead of needing a
-    second machine to diff against.
-    """
-    from .version import APP_VERSION
-
-    build = "AppImage" if getattr(sys, "frozen", False) else "source"
-    lines = ["=== launch diagnostics ==="]
-    lines.append(f"launcher = TCLauncher {APP_VERSION} ({build})")
-    lines.append(f"system = {system_summary()}")
+def diagnostic_lines(env: dict, game_exe_dir: str) -> list[str]:
+    """Linux-only diagnostic rows: Proton/umu/prefix/bridge/runtime."""
+    lines = [f"system = {system_summary()}"]
     lines.append(f"PROTONPATH = {env.get('PROTONPATH', '(unset)')}")
     lines.append(f"WINEPREFIX = {env.get('WINEPREFIX', '(unset)')}")
     lines.append(f"GAMEID = {env.get('GAMEID', '(unset)')}")
@@ -392,16 +343,8 @@ def format_launch_diagnostics(env: dict, game_exe_dir: str) -> str:
         f"steam_appid.txt: {appid_file} "
         f"({'present' if os.path.isfile(appid_file) else 'MISSING'})"
     )
-
-    for rv in runtime_versions():
-        lines.append(rv)
-
-    lines.append("relevant env:")
-    for line in relevant_env(env):
-        lines.append(f"  {line}")
-
-    lines.append("=== end diagnostics ===")
-    return "\n".join(lines)
+    lines.extend(runtime_versions())
+    return lines
 
 
 class GameRunner:

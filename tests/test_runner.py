@@ -6,16 +6,18 @@ import time
 import pytest
 
 from tclauncher.config import GAME_EXE_RELPATH, ConfigManager
+from tclauncher.diagnostics import (
+    format_launch_diagnostics,
+    relevant_env,
+    steam_login_summary,
+)
 from tclauncher.runner_linux import (
     GameRunner,
     find_umu,
-    format_launch_diagnostics,
     install_steam_bridge,
     prefix_steam_bridge,
-    relevant_env,
     running_steam,
     steam_install_kind,
-    steam_login_summary,
     steam_preflight_issue,
 )
 
