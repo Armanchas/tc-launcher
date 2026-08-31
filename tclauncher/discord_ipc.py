@@ -1,8 +1,8 @@
-"""Discord IPC transport.
+"""Speaks the local Discord RPC protocol over a platform connection.
 
-Speaks the local Discord RPC protocol over a Unix socket: an 8-byte
-little-endian header (opcode, payload length) followed by a JSON payload.
-Knows nothing about The Cycle -- see presence.py for the game-specific half.
+An 8-byte little-endian header (opcode, payload length) followed by a JSON
+payload. Knows nothing about The Cycle -- see presence.py for the
+game-specific half.
 
 Every operation is best-effort. Discord not running is the normal case, not
 an error: a game launch must never fail or be delayed because of presence.
@@ -15,7 +15,6 @@ seconds to milliseconds itself -- send seconds, never pre-multiply.
 import json
 import logging
 import os
-import socket
 import struct
 import uuid
 
@@ -24,49 +23,31 @@ logger = logging.getLogger(__name__)
 OP_HANDSHAKE = 0
 OP_FRAME = 1
 
-_RECV_TIMEOUT = 2.0
 
-
-def _candidate_dirs() -> list[str]:
-    """Directories Discord clients place their IPC socket in.
-
-    Mirrors the multi-location probing in runner.find_steam_install_path():
-    native, Flatpak and Snap installs each land somewhere different.
-    """
-    base = os.environ.get("XDG_RUNTIME_DIR") or os.environ.get("TMPDIR") or "/tmp"
-    return [
-        base,
-        os.path.join(base, "app", "com.discordapp.Discord"),
-        os.path.join(base, "app", "dev.vencord.Vesktop"),
-        os.path.join(base, "snap.discord"),
-    ]
-
-
-def find_ipc_socket() -> str | None:
-    """First existing discord-ipc-N socket, or None if Discord isn't running."""
-    for directory in _candidate_dirs():
-        for n in range(10):
-            path = os.path.join(directory, f"discord-ipc-{n}")
-            if os.path.exists(path):
-                return path
-    return None
+def _default_open_conn():
+    from .platforms import open_discord_ipc
+    return open_discord_ipc()
 
 
 class DiscordIPC:
-    def __init__(self):
-        self.sock: socket.socket | None = None
+    def __init__(self, open_conn=None):
+        # Injected so tests can drive the protocol without a real Discord.
+        self._open_conn = open_conn or _default_open_conn
+        self.conn = None
         self.connected = False
 
     def connect(self, client_id: str) -> bool:
-        path = find_ipc_socket()
-        if path is None:
-            logger.debug("No Discord IPC socket found; presence stays dormant")
-            return False
+        conn = None
         try:
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.settimeout(_RECV_TIMEOUT)
-            sock.connect(path)
-            self.sock = sock
+            conn = self._open_conn()
+        except Exception as e:
+            logger.debug(f"Discord connect failed: {e}")
+            return False
+        if conn is None:
+            logger.debug("No Discord IPC endpoint found; presence stays dormant")
+            return False
+        self.conn = conn
+        try:
             self._send(OP_HANDSHAKE, {"v": 1, "client_id": str(client_id)})
             self._recv()
         except (OSError, ValueError) as e:
@@ -74,7 +55,7 @@ class DiscordIPC:
             self.close()
             return False
         self.connected = True
-        logger.info(f"Discord presence connected via {path}")
+        logger.info(f"Discord presence connected via {conn.name}")
         return True
 
     def set_activity(self, activity: dict | None) -> bool:
@@ -99,16 +80,13 @@ class DiscordIPC:
 
     def close(self) -> None:
         self.connected = False
-        if self.sock is not None:
-            try:
-                self.sock.close()
-            except OSError:
-                pass
-            self.sock = None
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
 
     def _send(self, op: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
-        self.sock.sendall(struct.pack("<II", op, len(body)) + body)
+        self.conn.write(struct.pack("<II", op, len(body)) + body)
 
     def _recv(self) -> dict | None:
         header = self._recv_exactly(8)
@@ -121,10 +99,9 @@ class DiscordIPC:
         return json.loads(body)
 
     def _recv_exactly(self, n: int) -> bytes | None:
-        chunks = []
-        remaining = n
+        chunks, remaining = [], n
         while remaining > 0:
-            chunk = self.sock.recv(remaining)
+            chunk = self.conn.read(remaining)
             if not chunk:
                 return None
             chunks.append(chunk)

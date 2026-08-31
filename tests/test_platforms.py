@@ -20,3 +20,14 @@ def test_get_runner_returns_a_runner_with_the_full_contract(tmp_path):
 def test_runner_module_matches_the_platform():
     expected = "runner_windows" if platforms.IS_WINDOWS else "runner_linux"
     assert platforms._runner_module().__name__.endswith(expected)
+
+
+def test_preflight_is_dispatched_and_returns_str_or_none():
+    result = platforms.steam_preflight_issue("")
+    assert result is None or isinstance(result, str)
+
+
+def test_diagnostic_lines_is_dispatched_and_returns_a_list():
+    lines = platforms.diagnostic_lines({}, "/tmp")
+    assert isinstance(lines, list)
+    assert all(isinstance(line, str) for line in lines)

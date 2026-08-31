@@ -4,7 +4,8 @@ import socket
 import struct
 import threading
 
-from tclauncher.discord_ipc import DiscordIPC, find_ipc_socket
+from tclauncher import platforms
+from tclauncher.discord_ipc import DiscordIPC
 
 
 def _serve(path, captured, replies=2):
@@ -32,21 +33,25 @@ def _serve(path, captured, replies=2):
     return t
 
 
-def test_find_ipc_socket_prefers_xdg_runtime_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    sock_path = tmp_path / "discord-ipc-0"
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.bind(str(sock_path))
-    try:
-        assert find_ipc_socket() == str(sock_path)
-    finally:
-        s.close()
-
-
-def test_find_ipc_socket_returns_none_when_absent(tmp_path, monkeypatch):
+def test_open_discord_ipc_returns_none_when_absent(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     monkeypatch.setenv("TMPDIR", str(tmp_path))
-    assert find_ipc_socket() is None
+    assert platforms.open_discord_ipc() is None
+
+
+def test_open_discord_ipc_connects_to_an_existing_socket(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    path = str(tmp_path / "discord-ipc-0")
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(path)
+    srv.listen(1)
+    try:
+        conn = platforms.open_discord_ipc()
+        assert conn is not None
+        assert conn.name == path
+        conn.close()
+    finally:
+        srv.close()
 
 
 def test_connect_sends_handshake_and_set_activity(tmp_path, monkeypatch):

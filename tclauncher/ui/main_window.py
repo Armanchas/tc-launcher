@@ -372,6 +372,8 @@ class MainWindow(QMainWindow):
         self.session_manager.initiate_login(self.login_succeeded.emit)
 
     def _start_play(self):
+        # The compat-path override is Linux-only; the Windows implementation
+        # ignores the argument.
         steam_issue = steam_preflight_issue(
             self.config.env_vars.get("STEAM_COMPAT_CLIENT_INSTALL_PATH", "")
         )
