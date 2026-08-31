@@ -6,7 +6,7 @@ import time
 import pytest
 
 from tclauncher.config import GAME_EXE_RELPATH, ConfigManager
-from tclauncher.runner import (
+from tclauncher.runner_linux import (
     GameRunner,
     find_umu,
     format_launch_diagnostics,
@@ -25,7 +25,7 @@ def config(tmp_path, monkeypatch):
     # Stub Steam detection so build_command() tests don't depend on whether
     # the machine running the tests (dev box vs CI runner) has Steam.
     monkeypatch.setattr(
-        "tclauncher.runner.find_steam_install_path", lambda: "/stub/steam"
+        "tclauncher.runner_linux.find_steam_install_path", lambda: "/stub/steam"
     )
     config = ConfigManager(config_file=str(tmp_path / "config.json"))
     game_dir = tmp_path / "game"
@@ -68,7 +68,7 @@ def test_build_command_basic(config):
 
 
 def test_build_command_sets_steam_client_path_when_detected(config, monkeypatch):
-    monkeypatch.setattr("tclauncher.runner.find_steam_install_path", lambda: "/home/u/.steam/steam")
+    monkeypatch.setattr("tclauncher.runner_linux.find_steam_install_path", lambda: "/home/u/.steam/steam")
     _, env = GameRunner(config).build_command()
     assert env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] == "/home/u/.steam/steam"
 
@@ -77,13 +77,13 @@ def test_build_command_fails_when_steam_install_not_found(config, monkeypatch):
     """Without STEAM_COMPAT_CLIENT_INSTALL_PATH Proton never installs the
     steamclient bridge, so the game boots but Steam login fails. Refuse to
     launch with a precise error instead."""
-    monkeypatch.setattr("tclauncher.runner.find_steam_install_path", lambda: None)
+    monkeypatch.setattr("tclauncher.runner_linux.find_steam_install_path", lambda: None)
     with pytest.raises(RuntimeError, match="STEAM_COMPAT_CLIENT_INSTALL_PATH"):
         GameRunner(config).build_command()
 
 
 def test_build_command_user_env_var_rescues_failed_detection(config, monkeypatch):
-    monkeypatch.setattr("tclauncher.runner.find_steam_install_path", lambda: None)
+    monkeypatch.setattr("tclauncher.runner_linux.find_steam_install_path", lambda: None)
     config.env_vars = {"STEAM_COMPAT_CLIENT_INSTALL_PATH": "/custom/steam"}
     _, env = GameRunner(config).build_command()
     assert env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] == "/custom/steam"
@@ -93,7 +93,7 @@ def test_build_command_user_env_var_overrides_detection(config, monkeypatch):
     """An explicit value from Settings must win over detection — the user set
     it precisely because detection picks the wrong install."""
     monkeypatch.setattr(
-        "tclauncher.runner.find_steam_install_path", lambda: "/detected/steam"
+        "tclauncher.runner_linux.find_steam_install_path", lambda: "/detected/steam"
     )
     config.env_vars = {"STEAM_COMPAT_CLIENT_INSTALL_PATH": "/custom/steam"}
     _, env = GameRunner(config).build_command()
@@ -101,7 +101,7 @@ def test_build_command_user_env_var_overrides_detection(config, monkeypatch):
 
 
 def test_find_steam_install_path_detects_legacycompat(tmp_path, monkeypatch):
-    from tclauncher import runner
+    from tclauncher import runner_linux as runner
     steam = tmp_path / "Steam"
     (steam / "legacycompat").mkdir(parents=True)
     monkeypatch.setattr(runner, "STEAM_INSTALL_DIRS", [str(steam)])
@@ -290,7 +290,7 @@ def test_running_steam_returns_live_install(tmp_path, monkeypatch):
     install = tmp_path / "Steam"
     install.mkdir()
     monkeypatch.setattr(
-        "tclauncher.runner._STEAM_CANDIDATES",
+        "tclauncher.runner_linux._STEAM_CANDIDATES",
         [(str(pid_file), str(install), "native")],
     )
     assert running_steam() == (str(install.resolve()), "native")
@@ -300,7 +300,7 @@ def test_running_steam_none_when_pid_dead(tmp_path, monkeypatch):
     pid_file = tmp_path / "steam.pid"
     pid_file.write_text("999999999")  # not a live pid
     monkeypatch.setattr(
-        "tclauncher.runner._STEAM_CANDIDATES",
+        "tclauncher.runner_linux._STEAM_CANDIDATES",
         [(str(pid_file), str(tmp_path / "Steam"), "native")],
     )
     assert running_steam() is None
@@ -308,11 +308,11 @@ def test_running_steam_none_when_pid_dead(tmp_path, monkeypatch):
 
 def test_format_launch_diagnostics_reports_env_and_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "tclauncher.runner.running_steam",
+        "tclauncher.runner_linux.running_steam",
         lambda: ("/home/u/.local/share/Steam", "native"),
     )
     monkeypatch.setattr(
-        "tclauncher.runner.runtime_versions",
+        "tclauncher.runner_linux.runtime_versions",
         lambda: ["steamrt4: depot 4.0.20260714, pressure-vessel 0.20260714.0"],
     )
     env = {
@@ -330,8 +330,8 @@ def test_format_launch_diagnostics_reports_env_and_runtime(tmp_path, monkeypatch
 
 
 def test_format_launch_diagnostics_flags_no_running_steam(tmp_path, monkeypatch):
-    monkeypatch.setattr("tclauncher.runner.running_steam", lambda: None)
-    monkeypatch.setattr("tclauncher.runner.runtime_versions", lambda: [])
+    monkeypatch.setattr("tclauncher.runner_linux.running_steam", lambda: None)
+    monkeypatch.setattr("tclauncher.runner_linux.runtime_versions", lambda: [])
     text = format_launch_diagnostics({}, str(tmp_path))
     assert "NONE DETECTED" in text
     assert "conditions not met" in text
@@ -341,10 +341,10 @@ def test_format_launch_diagnostics_warns_on_compat_mismatch(tmp_path, monkeypatc
     """If the compat path we hand Proton is a different install than the one
     actually running, the ticket won't be issued — surface it loudly."""
     monkeypatch.setattr(
-        "tclauncher.runner.running_steam",
+        "tclauncher.runner_linux.running_steam",
         lambda: ("/home/u/.var/app/com.valvesoftware.Steam/data/Steam", "flatpak"),
     )
-    monkeypatch.setattr("tclauncher.runner.runtime_versions", lambda: [])
+    monkeypatch.setattr("tclauncher.runner_linux.runtime_versions", lambda: [])
     env = {"STEAM_COMPAT_CLIENT_INSTALL_PATH": "/home/u/.local/share/Steam"}
     text = format_launch_diagnostics(env, str(tmp_path))
     assert "WARNING" in text
@@ -353,15 +353,15 @@ def test_format_launch_diagnostics_warns_on_compat_mismatch(tmp_path, monkeypatc
 
 def test_steam_preflight_issue_none_when_running_matches(monkeypatch):
     monkeypatch.setattr(
-        "tclauncher.runner.running_steam",
+        "tclauncher.runner_linux.running_steam",
         lambda: ("/home/u/.local/share/Steam", "native"),
     )
     assert steam_preflight_issue("/home/u/.local/share/Steam") is None
 
 
 def test_steam_preflight_issue_warns_when_not_running(monkeypatch):
-    monkeypatch.setattr("tclauncher.runner.running_steam", lambda: None)
-    monkeypatch.setattr("tclauncher.runner.is_steam_running", lambda: False)
+    monkeypatch.setattr("tclauncher.runner_linux.running_steam", lambda: None)
+    monkeypatch.setattr("tclauncher.runner_linux.is_steam_running", lambda: False)
     msg = steam_preflight_issue("")
     assert msg is not None
     assert "not appear to be running" in msg
@@ -369,7 +369,7 @@ def test_steam_preflight_issue_warns_when_not_running(monkeypatch):
 
 def test_steam_preflight_issue_warns_on_mismatch(monkeypatch):
     monkeypatch.setattr(
-        "tclauncher.runner.running_steam",
+        "tclauncher.runner_linux.running_steam",
         lambda: ("/home/u/.var/app/com.valvesoftware.Steam/data/Steam", "flatpak"),
     )
     msg = steam_preflight_issue("/home/u/.local/share/Steam")
@@ -437,12 +437,12 @@ def test_steam_login_summary_no_file(tmp_path):
 
 def test_format_launch_diagnostics_includes_system_and_env(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "tclauncher.runner.running_steam",
+        "tclauncher.runner_linux.running_steam",
         lambda: ("/home/u/.local/share/Steam", "native"),
     )
-    monkeypatch.setattr("tclauncher.runner.runtime_versions", lambda: [])
+    monkeypatch.setattr("tclauncher.runner_linux.runtime_versions", lambda: [])
     monkeypatch.setattr(
-        "tclauncher.runner.steam_login_summary", lambda p: "1 account(s)"
+        "tclauncher.runner_linux.steam_login_summary", lambda p: "1 account(s)"
     )
     env = {
         "PROTONPATH": "/opt/GE-Proton11-1",

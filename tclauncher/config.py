@@ -16,6 +16,7 @@ PROTOCOL_VERSION = "1.0.3"
 LAUNCHER_USERDIR = os.path.join(os.path.expanduser("~"), ".tclauncher")
 CONFIG_FILE = os.path.join(LAUNCHER_USERDIR, "config.json")
 DEFAULT_WINE_PREFIX = os.path.join(LAUNCHER_USERDIR, "prefix")
+GAME_LOG = os.path.join(LAUNCHER_USERDIR, "game.log")
 
 GAME_EXE_RELPATH = os.path.join("Prospect", "Binaries", "Win64", "Prospect-Win64-Shipping.exe")
 

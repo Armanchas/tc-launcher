@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import ConfigManager
-from ..runner import find_proton_installs
+from ..runner_linux import find_proton_installs
 
 
 class SettingsDialog(QDialog):

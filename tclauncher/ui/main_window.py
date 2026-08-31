@@ -415,7 +415,7 @@ class MainWindow(QMainWindow):
                                 "Your game session is no longer valid. Log in with Steam again to play.")
             return
 
-        first_run = not self.runner.prefix_initialized()
+        first_run = self.runner.needs_first_run_setup()
         try:
             self.runner.launch(on_exit=self.game_exited.emit)
         except Exception as e:
