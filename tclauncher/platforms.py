@@ -11,7 +11,10 @@ for a single path string would be the wrong kind of tidy.
 
 import logging
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from types import ModuleType
 
 logger = logging.getLogger(__name__)
@@ -147,3 +150,56 @@ def open_discord_ipc():
             except OSError:
                 continue
     return None
+
+
+def helper_script() -> str:
+    """Path to the bundled swap helper for this platform."""
+    name = "update-helper.bat" if IS_WINDOWS else "update-helper.sh"
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        return os.path.join(base, name)
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "scripts", name)
+
+
+def update_swap(pid: int, old: str, new: str) -> None:
+    """Spawn the detached helper that waits for `pid`, swaps, and relaunches.
+
+    The helper is copied OUT of the bundle first, and the copy is what runs.
+    Both bundles vanish the moment we exit -- PyInstaller deletes a onefile
+    `_MEIPASS` directory, and a running AppImage's squashfs is unmounted --
+    while the helper is still sitting in its wait loop. `cmd.exe` re-reads a
+    .bat file as it executes each line, so a helper running from inside the
+    bundle can lose its own script halfway through the swap. Running from a
+    stable copy removes the question on both platforms.
+
+    The copy is deliberately not cleaned up: deleting it would put us back to a
+    script trying to remove itself while running. It is one small file per
+    update, in the OS temp directory.
+    """
+    helper = helper_script()
+    stable = os.path.join(tempfile.mkdtemp(prefix="tclauncher-update-"),
+                          os.path.basename(helper))
+    shutil.copy2(helper, stable)
+    if not IS_WINDOWS:
+        os.chmod(stable, 0o755)
+    helper = stable
+    if IS_WINDOWS:
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        # `call` is load-bearing, not decoration. tempfile puts the helper
+        # under %TEMP%, i.e. inside the user profile, so any username with a
+        # space in it ("John Doe") makes list2cmdline quote the FIRST token
+        # after /c. Per `cmd /?`, a command line that begins with a quote and
+        # holds more than two quotes has its leading quote and its last quote
+        # stripped -- the line is then mangled and the command name parses as
+        # "C:\Users\John". The unquoted word `call` in front means the line no
+        # longer begins with a quote, so that rule never fires.
+        subprocess.Popen(
+            ["cmd", "/c", "call", helper, str(pid), old, new],
+            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+        )
+    else:
+        subprocess.Popen(["sh", helper, str(pid), old, new],
+                         start_new_session=True, close_fds=True)

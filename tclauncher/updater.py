@@ -135,3 +135,50 @@ def can_replace(path: str) -> bool:
     except Exception as e:
         logger.debug(f"can_replace({path!r}) failed: {e}")
         return False
+
+
+def download(url: str, dest: str, on_progress=None, get=None) -> str:
+    """Stream `url` to `dest`, reporting 0.0-1.0 progress. Returns dest."""
+    if get is None:
+        get = _session().get
+    res = get(url, stream=True, timeout=30)
+    res.raise_for_status()
+    total = int(res.headers.get("content-length", 0))
+    written = 0
+    with open(dest, "wb") as f:
+        for chunk in res.iter_content(1024 * 1024):
+            if not chunk:
+                continue
+            f.write(chunk)
+            written += len(chunk)
+            if on_progress is not None and total > 0:
+                on_progress(min(written / total, 1.0))
+    if written == 0:
+        raise RuntimeError("Downloaded file was empty; update aborted.")
+    if total and written != total:
+        # Swapping a truncated binary over the running launcher is the one
+        # unrecoverable failure this module exists to avoid: the broken
+        # launcher is also the thing that would have delivered the fix.
+        # urllib3 normally raises on a short body when Content-Length is set;
+        # this is the belt to that braces.
+        raise RuntimeError(
+            f"Downloaded file was incomplete ({written} of {total} bytes); "
+            "update aborted.")
+    return dest
+
+
+def apply(new_path: str) -> None:
+    """Hand off to the swap helper and exit. Does not return.
+
+    The swap happens from a detached helper after we exit, because a running
+    AppImage is FUSE-mounted and a running exe is locked -- neither can be
+    overwritten in place.
+    """
+    from .platforms import update_swap
+
+    old = running_bundle_path()
+    if old is None:
+        raise RuntimeError("Not running as a bundled build; cannot self-update.")
+    update_swap(os.getpid(), old, new_path)
+    logger.info("Update helper launched; exiting for the swap.")
+    sys.exit(0)
