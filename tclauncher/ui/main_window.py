@@ -4,6 +4,7 @@ import time
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -22,6 +23,14 @@ from ..desktop import open_path
 from ..mods import ModManager
 from ..presence import start_presence
 from ..runner import GAME_LOG, GameRunner, steam_preflight_issue
+from ..updater import (
+    DEFAULT_REPO,
+    download,
+    running_bundle_path,
+    stage,
+    staging_path,
+    update_offer,
+)
 from ..version import APP_VERSION
 from .mods_dialog import ModsDialog
 from .server_dialog import ServerDialog
@@ -59,6 +68,7 @@ class MainWindow(QMainWindow):
         self._logged_in = False
         self._server_online = False
         self._status_hold = False
+        self._update_info = None
 
         self.setWindowTitle("The Cycle Launcher")
         self.setMinimumSize(460, 500)
@@ -78,6 +88,11 @@ class MainWindow(QMainWindow):
         self.status_timer.start()
 
         self._startup_checks()
+        # Never blocks or gates a launch: a failed check is silent, and a build
+        # running from source returns (None, False) without touching the network.
+        run_worker(update_offer, APP_VERSION,
+                   on_finished=self._on_update_checked,
+                   on_failed=lambda e: logger.debug(f"Update check failed: {e}"))
 
     # --- layout ---
 
@@ -178,6 +193,15 @@ class MainWindow(QMainWindow):
         btn_logs.setCursor(Qt.PointingHandCursor)
         btn_logs.clicked.connect(lambda: self._open_host_path(LAUNCHER_USERDIR))
         status.addWidget(btn_logs)
+        self.update_link = QLabel()
+        self.update_link.setObjectName("link")
+        # Handled in-process (download + swap), so Qt must not hand the href to
+        # a browser; the external-link branch supplies its own real URL.
+        self.update_link.setOpenExternalLinks(False)
+        self.update_link.setVisible(False)
+        self.update_link.setCursor(Qt.PointingHandCursor)
+        self.update_link.linkActivated.connect(self._on_update_link)
+        status.addWidget(self.update_link)
         version = QLabel(f"v{APP_VERSION}")
         version.setObjectName("dim")
         status.addWidget(version)
@@ -322,6 +346,105 @@ class MainWindow(QMainWindow):
                 self._set_status(f"{data['online']} players online", "online")
 
         run_worker(self.backend.server_status, on_finished=apply)
+
+    # --- self-update ---
+
+    def _on_update_checked(self, result):
+        """A newer release exists. Never modal, never automatic: consent is
+        explicit, because a silent update that silently fails is the worst
+        outcome."""
+        info, replaceable = result
+        if info is None:
+            return
+        self._update_info = info
+        if replaceable:
+            # Guarded like _check_launcher_update's notify(): a hold means a
+            # login or an "outdated launcher" message owns the status line.
+            if not self._status_hold:
+                self._set_status(
+                    f"Version {info.version} is available — click to update",
+                    "waiting")
+            self.update_link.setText(f"<a href='#'>Update to {info.version}</a>")
+        else:
+            # Unwritable install directory: offer the download instead of
+            # failing at the swap with the whole file already on disk.
+            self.update_link.setText(
+                f"<a href='https://github.com/{DEFAULT_REPO}/releases/latest'>"
+                f"Version {info.version} available</a>"
+            )
+        self.update_link.setVisible(True)
+
+    def _on_update_link(self, href: str):
+        """'#' is our in-place update; a real URL goes to the browser."""
+        if href and href != "#":
+            QDesktopServices.openUrl(QUrl(href))
+            return
+        self._start_update()
+
+    def _start_update(self):
+        info = self._update_info
+        if info is None:
+            return
+        answer = QMessageBox.question(
+            self, "Update launcher",
+            f"Download and install version {info.version}?\n\n"
+            "The launcher will close and restart itself.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        if self.runner.is_running():
+            # Quitting mid-game would orphan the running game and drop its
+            # presence session -- and this feature's one rule is that it can
+            # never break a launch.
+            QMessageBox.information(
+                self, "Update launcher",
+                "Close the game first — the launcher has to restart to finish "
+                "the update.")
+            return
+        bundle = running_bundle_path()
+        if bundle is None:
+            return
+        # Beside the target, NOT in %TEMP%: same-volume, so the helper's move is
+        # an atomic rename. can_replace() already proved this directory writable.
+        dest = staging_path(bundle)
+        self.update_link.setVisible(False)
+        self._status_hold = True
+        self._set_status("Downloading update…", "waiting")
+        run_worker(download, info.url, dest,
+                   expected_sha256=info.sha256,
+                   on_progress=self._update_progress,
+                   on_finished=self._update_downloaded,
+                   on_failed=lambda e: self._update_failed(str(e)))
+
+    def _update_progress(self, fraction: float):
+        # A ~78MB download with no feedback looks frozen, and a user who kills
+        # the launcher mid-download is the case we least want to invite.
+        self._set_status(f"Downloading update… {int(fraction * 100)}%", "waiting")
+
+    def _update_downloaded(self, path: str):
+        """Spawn the helper, then quit through Qt.
+
+        NOT `updater.apply()`: this slot runs on the GUI thread, so apply()'s
+        `sys.exit(0)` would raise SystemExit inside a Qt slot -- PySide6 handles
+        an exception escaping a slot inconsistently (it can be printed and
+        swallowed, or abort the process), and either way the event loop never
+        unwinds. quit() returns from app.exec() normally, so `sys.exit(app.exec())`
+        and interpreter shutdown run, and any teardown hooked to the quit path
+        still gets its chance.
+        """
+        try:
+            stage(path)
+        except Exception as e:
+            self._update_failed(str(e))
+            return
+        QApplication.instance().quit()
+
+    def _update_failed(self, message: str):
+        self._status_hold = False
+        self.update_link.setVisible(self._update_info is not None)
+        QMessageBox.warning(self, "Update failed",
+                            f"Could not install the update:\n\n{message}")
 
     # --- login / play ---
 

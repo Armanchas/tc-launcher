@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from tclauncher import updater
+from tclauncher import platforms, updater
 
 RELEASE = {
     "tag_name": "v1.0.9",
@@ -137,3 +137,115 @@ def test_check_never_raises_on_a_malformed_release_payload(payload):
         return R()
 
     assert updater.check("1.0.7", "owner/repo", get=_get) is None
+
+
+DIGEST_RELEASE = {
+    "tag_name": "v1.0.9",
+    "body": "",
+    "assets": [
+        {"name": "launcher.exe",
+         "browser_download_url": "https://example/launcher.exe",
+         "digest": "sha256:" + "ab" * 32},
+        {"name": "x.AppImage",
+         "browser_download_url": "https://example/x.AppImage",
+         "digest": "sha256:" + "ab" * 32},
+    ],
+}
+
+
+def _get_for(payload):
+    def _get(_url, **_kw):
+        class R:
+            status_code = 200
+            def raise_for_status(self): pass
+            def json(self): return payload
+        return R()
+    return _get
+
+
+def test_check_carries_the_assets_sha256_digest():
+    info = updater.check("1.0.7", "owner/repo", get=_get_for(DIGEST_RELEASE))
+    assert info.sha256 == "ab" * 32
+
+
+def test_a_release_without_a_digest_still_updates():
+    """Releases published before GitHub added the digest field, and any future
+    release missing it, must still be installable -- just unverified."""
+    info = updater.check("1.0.7", "owner/repo", get=_get)
+    assert info is not None
+    assert info.sha256 == ""
+
+
+def test_a_non_sha256_digest_is_ignored_not_misread():
+    """A future 'sha512:...' must not be compared as if it were sha256."""
+    payload = json_copy = {
+        "tag_name": "v1.0.9", "body": "",
+        "assets": [{"name": "launcher.exe", "browser_download_url": "https://e/f",
+                    "digest": "sha512:" + "cd" * 64},
+                   {"name": "x.AppImage", "browser_download_url": "https://e/f",
+                    "digest": "sha512:" + "cd" * 64}],
+    }
+    info = updater.check("1.0.7", "owner/repo", get=_get_for(payload))
+    assert info.sha256 == ""
+
+
+def test_offer_reports_when_a_swap_is_impossible(monkeypatch):
+    """An unwritable location must degrade to a link, not fail after 100MB."""
+    monkeypatch.setattr(updater, "running_bundle_path", lambda: "/nope/launcher")
+    info, replaceable = updater.update_offer("1.0.7", "owner/repo", get=_get)
+    assert info is not None
+    assert replaceable is False
+
+
+def test_offer_reports_replaceable_for_a_writable_bundle(tmp_path, monkeypatch):
+    bundle = tmp_path / "launcher"
+    bundle.write_text("x")
+    monkeypatch.setattr(updater, "running_bundle_path", lambda: str(bundle))
+    info, replaceable = updater.update_offer("1.0.7", "owner/repo", get=_get)
+    assert info is not None
+    assert replaceable is True
+
+
+def test_offer_is_silent_when_running_from_source(monkeypatch):
+    monkeypatch.setattr(updater, "running_bundle_path", lambda: None)
+    assert updater.update_offer("1.0.7", "owner/repo", get=_get) == (None, False)
+
+
+def test_the_staging_path_sits_beside_the_target_not_in_temp():
+    """A cross-volume move degrades from an atomic rename to copy+delete, and
+    an interruption there leaves a TRUNCATED launcher -- the one unrecoverable
+    outcome. %TEMP% is routinely on a different volume from the install dir."""
+    bundle = os.path.join("C:" + os.sep, "Games", "TC", "launcher.exe")
+    staged = updater.staging_path(bundle)
+    assert os.path.dirname(staged) == os.path.dirname(bundle)
+    assert staged != bundle
+
+
+def test_stage_spawns_the_helper_and_returns_instead_of_exiting(tmp_path, monkeypatch):
+    """The GUI calls stage(), never apply(): apply() ends in sys.exit(0), and a
+    SystemExit raised inside a Qt slot is unreliable under PySide6 and skips
+    closeEvent -- so the presence session and a running game are never torn
+    down. stage() must therefore spawn the helper and simply return."""
+    old = tmp_path / "launcher"
+    new = tmp_path / "launcher.new"
+    spawned = {}
+    monkeypatch.setattr(updater, "running_bundle_path", lambda: str(old))
+    monkeypatch.setattr(platforms, "update_swap",
+                        lambda pid, o, n: spawned.update(pid=pid, old=o, new=n))
+
+    updater.stage(str(new))     # must not raise SystemExit
+
+    assert spawned["old"] == str(old)
+    assert spawned["new"] == str(new)
+    assert spawned["pid"] == os.getpid()
+
+
+def test_stage_refuses_a_relative_path(tmp_path, monkeypatch):
+    """The .bat resolves %~f3 against the helper's inherited cwd, so a relative
+    path would silently resolve somewhere else entirely -- and `move` would then
+    either fail or swap in a file we never downloaded."""
+    monkeypatch.setattr(updater, "running_bundle_path", lambda: str(tmp_path / "launcher"))
+    monkeypatch.setattr(platforms, "update_swap",
+                        lambda *_a: pytest.fail("relative path reached the helper"))
+    with pytest.raises(ValueError):
+        updater.stage("launcher.new")

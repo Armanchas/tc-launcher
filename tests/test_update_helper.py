@@ -149,3 +149,41 @@ def test_download_of_a_truncated_body_raises(tmp_path):
     with pytest.raises(RuntimeError, match="incomplete"):
         updater.download("https://example/x", str(tmp_path / "o.bin"),
                          get=lambda *_a, **_kw: R())
+
+
+import hashlib
+
+
+def _body_response(body: bytes):
+    class R:
+        headers = {"content-length": str(len(body))}
+        def raise_for_status(self): pass
+        def iter_content(self, _n): return iter([body])
+    return lambda *_a, **_kw: R()
+
+
+def test_download_accepts_a_matching_sha256(tmp_path):
+    body = b"the real launcher"
+    dest = tmp_path / "ok.bin"
+    updater.download("https://example/x", str(dest),
+                     expected_sha256=hashlib.sha256(body).hexdigest(),
+                     get=_body_response(body))
+    assert dest.read_bytes() == body
+
+
+def test_download_rejects_a_mismatched_sha256_and_deletes_the_file(tmp_path):
+    """A corrupted download must never be left on disk where apply() could
+    swap it over the running launcher."""
+    dest = tmp_path / "bad.bin"
+    with pytest.raises(RuntimeError, match="checksum"):
+        updater.download("https://example/x", str(dest),
+                         expected_sha256="00" * 32,
+                         get=_body_response(b"tampered"))
+    assert not dest.exists(), "a checksum-failed download was left on disk"
+
+
+def test_download_without_an_expected_digest_skips_verification(tmp_path):
+    body = b"unverified but fine"
+    dest = tmp_path / "u.bin"
+    updater.download("https://example/x", str(dest), get=_body_response(body))
+    assert dest.read_bytes() == body
