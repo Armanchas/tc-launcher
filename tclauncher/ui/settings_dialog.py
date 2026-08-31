@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import ConfigManager
-from ..runner_linux import find_proton_installs
+from ..platforms import IS_WINDOWS
 
 
 class SettingsDialog(QDialog):
@@ -36,40 +36,45 @@ class SettingsDialog(QDialog):
         self.game_dir_edit = QLineEdit(self.config.game_dir)
         form.addRow("Game directory:", self._with_browse(self.game_dir_edit, directory=True))
 
-        # Proton picker
-        proton_row = QHBoxLayout()
-        self.proton_combo = QComboBox()
-        self.proton_combo.setEditable(False)
-        proton_row.addWidget(self.proton_combo, stretch=1)
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self._populate_protons)
-        proton_row.addWidget(refresh_btn)
-        browse_btn = QPushButton("Browse...")
-        browse_btn.clicked.connect(self._browse_proton)
-        proton_row.addWidget(browse_btn)
-        form.addRow("Proton version:", proton_row)
+        # Proton / prefix / umu: Windows runs the exe directly and has none of
+        # these concepts, so the rows (and their config keys) stay Linux-only.
+        if not IS_WINDOWS:
+            # Proton picker
+            proton_row = QHBoxLayout()
+            self.proton_combo = QComboBox()
+            self.proton_combo.setEditable(False)
+            proton_row.addWidget(self.proton_combo, stretch=1)
+            refresh_btn = QPushButton("Refresh")
+            refresh_btn.clicked.connect(self._populate_protons)
+            proton_row.addWidget(refresh_btn)
+            browse_btn = QPushButton("Browse...")
+            browse_btn.clicked.connect(self._browse_proton)
+            proton_row.addWidget(browse_btn)
+            form.addRow("Proton version:", proton_row)
 
-        # Wine prefix
-        self.prefix_edit = QLineEdit(self.config.wine_prefix)
-        form.addRow("Wine prefix:", self._with_browse(self.prefix_edit, directory=True))
+            # Wine prefix
+            self.prefix_edit = QLineEdit(self.config.wine_prefix)
+            form.addRow("Wine prefix:", self._with_browse(self.prefix_edit, directory=True))
 
-        # umu path override
-        self.umu_edit = QLineEdit(self.config.umu_path)
-        self.umu_edit.setPlaceholderText("Auto-detect umu-run on PATH")
-        form.addRow("umu-run path:", self._with_browse(self.umu_edit, directory=False))
+            # umu path override
+            self.umu_edit = QLineEdit(self.config.umu_path)
+            self.umu_edit.setPlaceholderText("Auto-detect umu-run on PATH")
+            form.addRow("umu-run path:", self._with_browse(self.umu_edit, directory=False))
 
         # Launch flags
         self.args_edit = QLineEdit(shlex.join(self.config.run_args))
         self.args_edit.setPlaceholderText("Extra game command-line flags, e.g. -log")
         form.addRow("Launch flags:", self.args_edit)
 
-        # Toggles
-        self.gamemode_check = QCheckBox("Run with GameMode (gamemoderun)")
-        self.gamemode_check.setChecked(self.config.use_gamemode)
-        form.addRow(self.gamemode_check)
-        self.mangohud_check = QCheckBox("Enable MangoHud overlay")
-        self.mangohud_check.setChecked(self.config.use_mangohud)
-        form.addRow(self.mangohud_check)
+        # Toggles. GameMode and MangoHud are Linux tools; Discord presence
+        # works on both platforms and must stay visible on Windows.
+        if not IS_WINDOWS:
+            self.gamemode_check = QCheckBox("Run with GameMode (gamemoderun)")
+            self.gamemode_check.setChecked(self.config.use_gamemode)
+            form.addRow(self.gamemode_check)
+            self.mangohud_check = QCheckBox("Enable MangoHud overlay")
+            self.mangohud_check.setChecked(self.config.use_mangohud)
+            form.addRow(self.mangohud_check)
         self.discord_check = QCheckBox("Show game status on Discord")
         self.discord_check.setChecked(self.config.discord_presence)
         form.addRow(self.discord_check)
@@ -117,6 +122,12 @@ class SettingsDialog(QDialog):
         return row
 
     def _populate_protons(self):
+        # __init__ calls this unconditionally; on Windows there is no
+        # proton_combo to fill (and no Linux runner worth importing).
+        if IS_WINDOWS:
+            return
+        from ..runner_linux import find_proton_installs
+
         self.proton_combo.clear()
         installs = find_proton_installs()
         current_index = 0
@@ -164,13 +175,16 @@ class SettingsDialog(QDialog):
                 env_vars[name] = value_item.text() if value_item else ""
 
         self.config.game_dir = self.game_dir_edit.text().strip()
-        self.config.proton_path = self.proton_combo.currentData() or ""
-        self.config.wine_prefix = self.prefix_edit.text().strip()
-        self.config.umu_path = self.umu_edit.text().strip()
         self.config.run_args = run_args
-        self.config.use_gamemode = self.gamemode_check.isChecked()
-        self.config.use_mangohud = self.mangohud_check.isChecked()
         self.config.discord_presence = self.discord_check.isChecked()
+        # The Linux-only rows are not built on Windows: leave their keys at
+        # whatever they already held rather than clearing them.
+        if not IS_WINDOWS:
+            self.config.proton_path = self.proton_combo.currentData() or ""
+            self.config.wine_prefix = self.prefix_edit.text().strip()
+            self.config.umu_path = self.umu_edit.text().strip()
+            self.config.use_gamemode = self.gamemode_check.isChecked()
+            self.config.use_mangohud = self.mangohud_check.isChecked()
         self.config.env_vars = env_vars
         self.config.save()
         self.accept()

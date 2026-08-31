@@ -7,6 +7,7 @@ names so a config written by either launcher stays readable by the other.
 import json
 import logging
 import os
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,32 @@ GAME_EXE_RELPATH = os.path.join("Prospect", "Binaries", "Win64", "Prospect-Win64
 # Shipped as a default so Windows players (who never hand-edit config.json) get
 # presence without configuration.
 DEFAULT_DISCORD_CLIENT_ID = "1542185056418660362"
+
+
+def default_game_dir() -> str:
+    """The launcher's own folder, if the game lives there.
+
+    prospect-og has no game-dir setting at all: it sits inside the game's
+    Release folder and derives everything from its own location. Players drop
+    the launcher in beside Prospect/ and expect it to just work, so adopt that
+    folder when it looks right and fall back to the Locate flow otherwise.
+
+    Harmless on Linux, where the AppImage almost never sits in the game folder.
+    """
+    try:
+        if getattr(sys, "frozen", False):
+            # os.path.abspath("") is the cwd, so an empty sys.executable would
+            # otherwise resolve to the cwd's parent and adopt a folder the
+            # player never chose.
+            exe = getattr(sys, "executable", "")
+            base = os.path.dirname(os.path.abspath(exe)) if exe else ""
+        else:
+            base = os.getcwd()
+        if base and os.path.isfile(os.path.join(base, GAME_EXE_RELPATH)):
+            return base
+    except OSError:
+        pass
+    return ""
 
 
 class ConfigManager:
@@ -74,7 +101,12 @@ class ConfigManager:
             self.discord_client_id = (
                 data.get("discord_client_id", "") or DEFAULT_DISCORD_CLIENT_ID
             )
+            if not self.game_dir:
+                self.game_dir = default_game_dir()
         else:
+            # First run: no config yet. This is the case the feature exists for.
+            if not self.game_dir:
+                self.game_dir = default_game_dir()
             self.save()
 
     def save(self):
