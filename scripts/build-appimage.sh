@@ -33,6 +33,7 @@ ENTRYPOINT
     --workpath build/pyinstaller \
     --specpath build \
     --add-data "$(pwd)/tclauncher/assets:tclauncher/assets" \
+    --add-data "$(pwd)/scripts/update-helper.sh:." \
     build/entrypoint.py
 
 # 2) AppDir layout

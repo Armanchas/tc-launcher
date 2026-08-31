@@ -249,3 +249,14 @@ def test_stage_refuses_a_relative_path(tmp_path, monkeypatch):
                         lambda *_a: pytest.fail("relative path reached the helper"))
     with pytest.raises(ValueError):
         updater.stage("launcher.new")
+
+
+def test_both_build_scripts_bundle_the_swap_helper():
+    """helper_script() resolves into the bundle at runtime, so a build that
+    ships no helper produces a launcher whose self-update dies at the copy.
+    Nothing else catches this: running from source, there is no _MEIPASS."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for script, helper in (("scripts/build-appimage.sh", "update-helper.sh"),
+                           ("scripts/build-windows.ps1", "update-helper.bat")):
+        text = open(os.path.join(root, script), encoding="utf-8").read()
+        assert helper in text, f"{script} does not bundle {helper}"

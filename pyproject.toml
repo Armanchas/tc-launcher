@@ -1,5 +1,5 @@
 [project]
-name = "tc-launcher-linux"
+name = "tc-launcher"
 dynamic = ["version"]
 description = "Linux launcher for The Cycle community servers"
 readme = "README.md"
