@@ -65,6 +65,11 @@ class ModManager:
         try:
             with open(self._mod_file(), "r", encoding="utf-8") as f:
                 self.installed_mods = json.load(f)
+        except FileNotFoundError:
+            # No mods installed yet. The normal first-run state -- logging a
+            # traceback here made a tester's log open on a scary non-problem.
+            logger.debug("No mods.json yet; treating as no mods installed")
+            self.installed_mods = {}
         except Exception as e:
             logger.exception(e)
             self.installed_mods = {}

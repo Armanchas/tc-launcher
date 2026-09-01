@@ -44,14 +44,58 @@ def find_steam_install_path() -> str | None:
     return None
 
 
+def _steam_registry_dword(name: str) -> int | None:
+    r"""Read HKCU\Software\Valve\Steam\ActiveProcess\<name>, or None.
+
+    This is the key the Steam client itself maintains and Steamworks reads, so
+    it answers both "is Steam up" and "is anyone signed in" without spawning a
+    process. That matters: the launcher is a --noconsole build, and a console
+    child there can fail in ways that are invisible from inside the app.
+    """
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Valve\Steam\ActiveProcess") as key:
+            value, _ = winreg.QueryValueEx(key, name)
+            return int(value)
+    except (ImportError, OSError, TypeError, ValueError) as e:
+        logger.debug(f"Steam ActiveProcess\\{name} unreadable: {e}")
+        return None
+
+
+def steam_active_user() -> int | None:
+    """SteamID of the signed-in user; **0 means Steam is up but signed out**.
+
+    None means we could not tell. Signed-out is the state that produces
+    `Failed to acquire Steam auth session ticket` in the game's log while
+    `Client API initialized 1` still succeeds — the client is reachable, it
+    just has no account to issue a ticket for.
+    """
+    return _steam_registry_dword("ActiveUser")
+
+
 def is_steam_running() -> bool:
-    """True if steam.exe is in the process list."""
+    """True if the Steam client is up.
+
+    Registry first. `pid` can in principle go stale if Steam is killed rather
+    than closed, but a false positive only drops a warning, whereas the false
+    NEGATIVE this replaced sent a tester hunting a Steam problem that was not
+    there.
+    """
+    pid = _steam_registry_dword("pid")
+    if pid is not None:
+        return pid != 0
     try:
         out = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq steam.exe", "/NH"],
+            stdin=subprocess.DEVNULL,   # --noconsole: no valid handle to inherit
             capture_output=True, text=True, timeout=5,
         ).stdout
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as e:
+        # Never swallow this again: the first tester round reported
+        # "Steam running: NO" against a Steam that was demonstrably running,
+        # and there was nothing in the log to say why.
+        logger.debug(f"Steam process check failed: {e}")
         return False
     return "steam.exe" in out.lower()
 
@@ -68,6 +112,15 @@ def steam_preflight_issue(config_compat: str = "") -> str | None:
             "authenticates through Steam, so launching without it will fail "
             "with an authentication error."
         )
+    if steam_active_user() == 0:
+        # Distinct from "not running" on purpose: a Steam sitting at its login
+        # screen still answers SteamAPI_Init, so the game gets as far as
+        # "Client API initialized 1" and only then fails to obtain a ticket.
+        return (
+            "Steam is running but no account is signed in. The game gets its "
+            "authentication ticket from the signed-in Steam account, so "
+            "launching now will fail at the login screen."
+        )
     return None
 
 
@@ -81,6 +134,11 @@ def diagnostic_lines(env: dict, game_exe_dir: str) -> list[str]:
     steam_path = find_steam_install_path() or ""
     lines.append(f"Steam install: {steam_path or 'NOT FOUND'}")
     lines.append(f"Steam running: {'yes' if is_steam_running() else 'NO'}")
+    active = steam_active_user()
+    lines.append(
+        "Steam signed in: "
+        + ("unknown" if active is None else ("NO (signed out)" if active == 0 else "yes"))
+    )
     lines.append(f"Steam login (on-disk): {steam_login_summary(steam_path)}")
     appid_file = os.path.join(game_exe_dir, "steam_appid.txt")
     lines.append(

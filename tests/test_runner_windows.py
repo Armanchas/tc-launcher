@@ -95,3 +95,53 @@ def test_diagnostic_lines_mention_steam_appid_and_never_raise(tmp_path):
     blob = "\n".join(lines)
     assert "steam_appid.txt" in blob
     assert "Steam login" in blob
+
+
+# --- Steam detection, after the first tester round -------------------------
+# The tester's game.log said "Steam running: NO" while the game itself logged
+# "[AppId: 480] Client API initialized 1" -- which only happens against a live
+# Steam client. The process-list check was wrong, so detection moved to the
+# registry key Steam maintains and Steamworks reads.
+
+def test_steam_is_running_when_the_active_process_pid_is_set(monkeypatch):
+    monkeypatch.setattr(runner_windows, "_steam_registry_dword",
+                        lambda name: 4242 if name == "pid" else 0)
+    assert runner_windows.is_steam_running() is True
+
+
+def test_steam_is_not_running_when_the_active_process_pid_is_zero(monkeypatch):
+    monkeypatch.setattr(runner_windows, "_steam_registry_dword",
+                        lambda name: 0)
+    assert runner_windows.is_steam_running() is False
+
+
+def test_a_signed_out_steam_is_reported_differently_from_a_stopped_one(monkeypatch):
+    """The tester's Steam was RUNNING but produced no auth ticket. 'Steam is
+    not running' sent them looking in the wrong place; these must not read the
+    same."""
+    monkeypatch.setattr(runner_windows, "_steam_registry_dword",
+                        lambda name: 4242 if name == "pid" else 0)
+    signed_out = runner_windows.steam_preflight_issue()
+
+    monkeypatch.setattr(runner_windows, "_steam_registry_dword",
+                        lambda name: 0)
+    stopped = runner_windows.steam_preflight_issue()
+
+    assert signed_out and stopped and signed_out != stopped
+    assert "does not appear to be running" in stopped.lower()
+    assert "signed in" in signed_out.lower() or "logged in" in signed_out.lower()
+
+
+def test_no_warning_when_steam_is_running_and_signed_in(monkeypatch):
+    monkeypatch.setattr(runner_windows, "_steam_registry_dword",
+                        lambda name: 4242 if name == "pid" else 76561190000000000)
+    assert runner_windows.steam_preflight_issue() is None
+
+
+def test_diagnostics_report_the_signed_in_state(monkeypatch, tmp_path):
+    """'Steam running: yes' alone could not distinguish the tester's failure."""
+    monkeypatch.setattr(runner_windows, "_steam_registry_dword",
+                        lambda name: 4242 if name == "pid" else 0)
+    lines = "\n".join(runner_windows.diagnostic_lines({}, str(tmp_path)))
+    assert "Steam signed in:" in lines
+    assert "NO" in lines.split("Steam signed in:")[1].splitlines()[0]
