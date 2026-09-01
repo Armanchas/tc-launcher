@@ -1,5 +1,11 @@
 # Build the Windows launcher: PyInstaller onefile -> dist\launcher.exe
 #
+# --noupx is deliberate. PyInstaller uses UPX automatically if it finds it on
+# PATH, and UPX-packed binaries are one of the strongest antivirus heuristics
+# going. Passing it explicitly makes the output the same whatever the build
+# machine has installed. It does not fix Defender false positives on its own --
+# see docs/windows-release-checklist.md -- but it removes one clear trigger.
+#
 # onefile, and named launcher.exe, on purpose:
 #   - one file is trivially swappable by update-helper.bat, symmetric with the
 #     AppImage, so one helper design covers both platforms;
@@ -60,6 +66,7 @@ Remove-Item -Force -ErrorAction SilentlyContinue dist\launcher.exe
 .\.venv-win\Scripts\pyinstaller.exe `
     --onefile `
     --noconsole `
+    --noupx `
     --name launcher `
     --icon "$root\icon.ico" `
     --add-data "$root\scripts\update-helper.bat;." `
