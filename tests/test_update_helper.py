@@ -24,7 +24,8 @@ def test_helper_waits_for_the_pid_then_swaps_and_relaunches(tmp_path):
     new.chmod(0o755)
 
     victim = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"])
-    subprocess.Popen(["sh", HELPER, str(victim.pid), str(old), str(new)])
+    subprocess.Popen(["sh", HELPER, str(victim.pid), str(old), str(new)],
+                     env={**os.environ, "HOME": str(tmp_path)})
 
     victim.wait()
     deadline = time.time() + 15
@@ -44,7 +45,8 @@ def test_helper_does_not_swap_while_the_pid_is_alive(tmp_path):
     new.write_text("new")
 
     victim = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3)"])
-    helper = subprocess.Popen(["sh", HELPER, str(victim.pid), str(old), str(new)])
+    helper = subprocess.Popen(["sh", HELPER, str(victim.pid), str(old), str(new)],
+                     env={**os.environ, "HOME": str(tmp_path)})
     time.sleep(1.0)
     assert old.read_text() == "old", "helper swapped before the app exited"
     # Without this, the test passes when the helper is absent or crashed --
@@ -187,3 +189,41 @@ def test_download_without_an_expected_digest_skips_verification(tmp_path):
     dest = tmp_path / "u.bin"
     updater.download("https://example/x", str(dest), get=_body_response(body))
     assert dest.read_bytes() == body
+
+
+@pytest.mark.skipif(platforms.IS_WINDOWS, reason="POSIX helper and chmod semantics")
+def test_the_helper_retries_a_move_that_fails_at_first(tmp_path):
+    """One move attempt is not enough, which is how the first real update failed.
+
+    A PyInstaller onefile build is two processes: the launcher.exe bootloader
+    and the child it re-executes. `os.getpid()` is the child, so when it exits
+    the parent is often still alive clearing its temp tree, and Windows holds an
+    open handle to a running process image -- the move fails purely on timing.
+    Antivirus scanning a fresh download does the same. Simulated here with an
+    unwritable directory, which is the one way to make `mv` fail on POSIX.
+    """
+    target = tmp_path / "dir"
+    target.mkdir()
+    old, new = target / "app", target / "app.new"
+    old.write_text("old")
+    new.write_text("new")
+    old.chmod(0o755)
+
+    victim = subprocess.Popen([sys.executable, "-c", "pass"])
+    victim.wait()
+
+    os.chmod(target, 0o500)  # mv cannot rename within a read-only directory
+    try:
+        helper = subprocess.Popen(
+            ["sh", HELPER, str(victim.pid), str(old), str(new)],
+            env={**os.environ, "HOME": str(tmp_path)})
+        time.sleep(2.5)
+        assert old.read_text() == "old", "moved into an unwritable directory"
+        assert helper.poll() is None, "the helper gave up instead of retrying"
+    finally:
+        os.chmod(target, 0o700)
+
+    helper.wait(timeout=30)
+    assert old.read_text() == "new", "the helper never retried after the move failed"
+    log = (tmp_path / ".tclauncher" / "update-helper.log").read_text()
+    assert "swapped after" in log, "the helper did not record what it did"
