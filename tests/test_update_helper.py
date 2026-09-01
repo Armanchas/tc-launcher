@@ -227,3 +227,74 @@ def test_the_helper_retries_a_move_that_fails_at_first(tmp_path):
     assert old.read_text() == "new", "the helper never retried after the move failed"
     log = (tmp_path / ".tclauncher" / "update-helper.log").read_text()
     assert "swapped after" in log, "the helper did not record what it did"
+
+
+def test_windows_swap_gives_the_helper_valid_null_handles(monkeypatch):
+    """The helper's children must never be able to block on a console read.
+
+    The first real update hung in a window titled "find <pid>": DETACHED_PROCESS
+    left cmd with no console, so `find` fell back to reading console input and
+    waited forever. Null handles give it an immediate EOF instead, and
+    CREATE_NO_WINDOW keeps the console hidden rather than absent.
+    """
+    monkeypatch.setattr(platforms, "IS_WINDOWS", True)
+    seen = {}
+
+    class FakePopen:
+        def __init__(self, argv, **kw):
+            seen["argv"], seen["kw"] = argv, kw
+
+    monkeypatch.setattr(platforms.subprocess, "Popen", FakePopen)
+    platforms.update_swap(1, "C:\\a.exe", "C:\\b.new")
+
+    assert seen["kw"]["stdin"] is subprocess.DEVNULL
+    assert seen["kw"]["stdout"] is subprocess.DEVNULL
+    assert seen["kw"]["stderr"] is subprocess.DEVNULL
+    flags = seen["kw"]["creationflags"]
+    assert flags & 0x08000000, "CREATE_NO_WINDOW not set"
+    assert not flags & 0x00000008, "DETACHED_PROCESS leaves children with no stdin"
+
+
+def test_the_bat_never_runs_a_command_that_reads_stdin():
+    """`find`/`findstr` without a filename read stdin and can hang the helper."""
+    bat = os.path.join(os.path.dirname(HELPER), "update-helper.bat")
+    for line in open(bat, encoding="utf-8"):
+        stripped = line.strip()
+        if stripped.lower().startswith("rem") or not stripped:
+            continue
+        assert "tasklist" not in stripped.lower(), f"tasklist is back: {stripped}"
+        assert not stripped.lower().startswith("find"), f"bare find: {stripped}"
+        assert "| find" not in stripped.lower(), f"piped into find: {stripped}"
+
+
+def test_the_swap_helper_does_not_inherit_the_bundles_library_path(tmp_path, monkeypatch):
+    """A running AppImage exports LD_LIBRARY_PATH into its own bundled libs, and
+    a shell that inherits it dies before executing a single line:
+
+        sh: symbol lookup error: sh: undefined symbol: rl_trim_arg_from_keyseq
+
+    Reproduced against a real 1.1.3 AppImage, whose _internal ships
+    libtinfo.so.6 among ~100 libraries. It is why the first AppImage self-update
+    logged "Update helper launched" and the helper's own log stayed empty.
+    Every other child spawn in the codebase already goes through
+    clean_child_env; this one did not.
+    """
+    bundled = tmp_path / "update-helper.sh"
+    bundled.write_text("#!/bin/sh\nexit 0\n")
+    monkeypatch.setattr(platforms, "helper_script", lambda: str(bundled))
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/appimage/_internal")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/lib/x86_64-linux-gnu")
+
+    seen = {}
+
+    class FakePopen:
+        def __init__(self, argv, **kw):
+            seen.update(kw)
+
+    monkeypatch.setattr(platforms.subprocess, "Popen", FakePopen)
+    platforms.update_swap(1, "/old", "/new")
+
+    env = seen.get("env")
+    assert env is not None, "the helper inherited our environment wholesale"
+    assert env["LD_LIBRARY_PATH"] == "/usr/lib/x86_64-linux-gnu", \
+        "the bundle's library path reached the helper"

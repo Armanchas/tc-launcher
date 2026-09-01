@@ -111,7 +111,7 @@ the status bar as a link. There is no pop-up and no automatic download. Click
 it, confirm, and the launcher downloads the new build, closes, swaps itself, and
 restarts.
 
-- Nothing happens without your click. A failed check is silent.
+- Nothing happens without your click.
 - It will not update while the game is running. Close the game first.
 - If the launcher cannot write to its own folder, it offers a download link
   instead of failing partway.
@@ -211,6 +211,3 @@ powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1   # Windows
 
 The Windows artifact has to stay named exactly `launcher.exe`, because the
 self-updater matches the release asset by that name.
-
-`CLAUDE.md` is the guide for anyone changing the code, and
-`docs/windows-release-checklist.md` covers cutting a Windows release.

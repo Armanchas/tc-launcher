@@ -177,6 +177,8 @@ def update_swap(pid: int, old: str, new: str) -> None:
     script trying to remove itself while running. It is one small file per
     update, in the OS temp directory.
     """
+    from .desktop import clean_child_env
+
     helper = helper_script()
     stable = os.path.join(tempfile.mkdtemp(prefix="tclauncher-update-"),
                           os.path.basename(helper))
@@ -185,7 +187,7 @@ def update_swap(pid: int, old: str, new: str) -> None:
         os.chmod(stable, 0o755)
     helper = stable
     if IS_WINDOWS:
-        DETACHED_PROCESS = 0x00000008
+        CREATE_NO_WINDOW = 0x08000000
         CREATE_NEW_PROCESS_GROUP = 0x00000200
         # `call` is load-bearing, not decoration. tempfile puts the helper
         # under %TEMP%, i.e. inside the user profile, so any username with a
@@ -195,11 +197,30 @@ def update_swap(pid: int, old: str, new: str) -> None:
         # stripped -- the line is then mangled and the command name parses as
         # "C:\Users\John". The unquoted word `call` in front means the line no
         # longer begins with a quote, so that rule never fires.
+        # CREATE_NO_WINDOW, not DETACHED_PROCESS. Detached leaves the helper
+        # with no console at all, so every console child it runs pops its own
+        # window AND inherits no usable stdin -- which is how `find` ended up
+        # blocking forever on a console read, in a window titled "find <pid>",
+        # with the swap never happening. A hidden console plus explicit null
+        # handles gives the children something valid to read EOF from and shows
+        # the user nothing. The helper still outlives us: Windows does not kill
+        # children when a parent exits.
         subprocess.Popen(
             ["cmd", "/c", "call", helper, str(pid), old, new],
-            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            creationflags=CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
+            env=clean_child_env(dict(os.environ)),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             close_fds=True,
         )
     else:
+        # A running AppImage exports LD_LIBRARY_PATH into its own bundled
+        # libraries, and a shell that inherits it dies before running a line:
+        #   sh: symbol lookup error: sh: undefined symbol: rl_trim_arg_from_keyseq
+        # (the bundle ships libtinfo.so.6 among ~100 others). That is exactly how
+        # the first real AppImage self-update failed -- "Update helper launched"
+        # in launcher.log and not one line in the helper's own log.
         subprocess.Popen(["sh", helper, str(pid), old, new],
+                         env=clean_child_env(dict(os.environ)),
                          start_new_session=True, close_fds=True)
