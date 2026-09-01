@@ -211,6 +211,3 @@ powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1   # Windows
 
 The Windows artifact has to stay named exactly `launcher.exe`, because the
 self-updater matches the release asset by that name.
-
-`CLAUDE.md` is the guide for anyone changing the code, and
-`docs/windows-release-checklist.md` covers cutting a Windows release.
