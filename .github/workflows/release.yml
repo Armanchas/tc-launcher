@@ -13,6 +13,20 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      # A tag whose APP_VERSION does not match it ships a build that reports
+      # the OLD version while the release advertises the new one. Every user
+      # then updates, stays on the old version, and is offered the same update
+      # forever. Fail the build instead.
+      - name: Tag must match APP_VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          v=$(python3 -c "import re;print(re.search(r'APP_VERSION = \"(.+)\"', open('tclauncher/version.py').read()).group(1))")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "tag=$tag APP_VERSION=$v"
+          if [ "$v" != "$tag" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match APP_VERSION $v"
+            exit 1
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -41,6 +55,16 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      # See the note in the AppImage job: a tag/APP_VERSION mismatch ships a
+      # build that can never stop offering its own update.
+      - name: Tag must match APP_VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path tclauncher/version.py -Pattern 'APP_VERSION = "(.+)"').Matches[0].Groups[1].Value
+          $tag = $env:GITHUB_REF_NAME -replace '^v',''
+          Write-Host "tag=$tag APP_VERSION=$v"
+          if ($v -ne $tag) { throw "Tag $env:GITHUB_REF_NAME does not match APP_VERSION $v" }
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
