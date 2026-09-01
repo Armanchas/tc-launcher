@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 # Set by the frozen app for itself; must not leak to host helper processes.
 _BUNDLE_ONLY_VARS = ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH")
 
+# PyInstaller's own bookkeeping. Matched by prefix rather than by name so a new
+# one in a future release cannot quietly start leaking again; `_MEIPASS2` is the
+# pre-6.x spelling and has no prefix.
+_PYI_STATE_PREFIX = "_PYI"
+_PYI_LEGACY_VARS = ("_MEIPASS2",)
+
 
 def clean_child_env(env: dict[str, str]) -> dict[str, str]:
     """Environment for host child processes: undo PyInstaller's overrides.
@@ -25,6 +31,16 @@ def clean_child_env(env: dict[str, str]) -> dict[str, str]:
     PyInstaller saves the pre-launch LD_LIBRARY_PATH in LD_LIBRARY_PATH_ORIG;
     restore it (or drop the override entirely) and remove Qt plugin paths that
     only make sense inside the bundle.
+
+    Also strips PyInstaller's internal `_PYI_*` state. `_PYI_PARENT_PROCESS_LEVEL`
+    is how the bootloader decides whether it is a top-level process or a child:
+    unset means top-level. Leaking it into a relaunched launcher.exe makes the
+    new process think it is a worker, so it runs the bootloader's parent
+    executable check, finds whatever spawned it instead of itself, and exits
+    with "Security validation failure: failed to obtain executable path for
+    parent process!". That check exists precisely to stop a spoofed environment
+    pointing an executable at an arbitrary application directory -- we were
+    tripping it by accident.
     """
     cleaned = dict(env)
     original = cleaned.pop("LD_LIBRARY_PATH_ORIG", None)
@@ -32,7 +48,9 @@ def clean_child_env(env: dict[str, str]) -> dict[str, str]:
         cleaned["LD_LIBRARY_PATH"] = original
     else:
         cleaned.pop("LD_LIBRARY_PATH", None)
-    for var in _BUNDLE_ONLY_VARS:
+    for var in _BUNDLE_ONLY_VARS + _PYI_LEGACY_VARS:
+        cleaned.pop(var, None)
+    for var in [k for k in cleaned if k.startswith(_PYI_STATE_PREFIX)]:
         cleaned.pop(var, None)
     return cleaned
 

@@ -131,3 +131,25 @@ def test_initiate_login_opens_browser_via_sanitized_open_url(monkeypatch):
         "https://discovery.example/steam/openid/login"
         "?launcher_redirect=http://localhost:12345/auth_result"
     ]
+
+
+def test_pyinstallers_own_internal_vars_never_reach_a_child():
+    """`_PYI_PARENT_PROCESS_LEVEL` is how the bootloader decides it is a CHILD
+    onefile process: unset means top-level. Leak it into a relaunched
+    launcher.exe and the new process believes it is a worker, runs the parent
+    executable check, finds cmd.exe instead of itself, and dies with
+
+        Security validation failure: failed to obtain executable path for
+        parent process!
+
+    which is exactly how the first successful Windows swap failed to restart.
+    """
+    cleaned = clean_child_env({
+        "PATH": "/usr/bin",
+        "_PYI_PARENT_PROCESS_LEVEL": "1",
+        "_PYI_APPLICATION_HOME_DIR": "/tmp/_MEI123",
+        "_PYI_ARCHIVE_FILE": "/opt/launcher.exe",
+        "_PYI_LINUX_PROCESS_NAME": "launcher",
+        "_MEIPASS2": "/tmp/_MEI123",
+    })
+    assert cleaned == {"PATH": "/usr/bin"}, f"PyInstaller state leaked: {cleaned}"
