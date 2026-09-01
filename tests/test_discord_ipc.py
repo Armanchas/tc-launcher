@@ -4,8 +4,23 @@ import socket
 import struct
 import threading
 
+import pytest
+
 from tclauncher import platforms
 from tclauncher.discord_ipc import DiscordIPC
+
+# This file drives the real Linux endpoint: it binds an AF_UNIX socket inside a
+# monkeypatched XDG_RUNTIME_DIR and asserts open_discord_ipc() finds and speaks
+# to it. The Windows endpoint is a named pipe under \\.\pipe\, which has no
+# equivalent redirection -- pointing the probe at a temp directory does nothing,
+# so these tests would either fail or reach a live Discord. The framing they
+# also cover is asserted platform-neutrally in test_discord_ipc_transport.py
+# against a fake connection.
+pytestmark = pytest.mark.skipif(
+    platforms.IS_WINDOWS,
+    reason="binds a real AF_UNIX Discord socket in XDG_RUNTIME_DIR; the "
+           "Windows endpoint is a named pipe that cannot be redirected",
+)
 
 
 def _serve(path, captured, replies=2):

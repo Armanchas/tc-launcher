@@ -3,6 +3,8 @@
 import json
 import struct
 
+import pytest
+
 from tclauncher import platforms
 from tclauncher.discord_ipc import OP_FRAME, OP_HANDSHAKE, DiscordIPC
 
@@ -87,6 +89,11 @@ def test_a_broken_connection_degrades_instead_of_raising():
     assert ipc.connect("123") is False
 
 
+@pytest.mark.skipif(
+    platforms.IS_WINDOWS,
+    reason="pins the Unix-socket probe to an empty XDG_RUNTIME_DIR; the "
+           "Windows probe enumerates real named pipes and cannot be aimed at "
+           "a temp directory, so it would reach a live Discord")
 def test_open_discord_ipc_returns_none_when_no_endpoint_exists(tmp_path, monkeypatch):
     """Must not reach the developer's live Discord: point the probe at an
     empty runtime dir so the result is deterministic on any machine."""

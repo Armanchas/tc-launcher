@@ -5,6 +5,7 @@ import time
 
 import pytest
 
+from tclauncher import platforms
 from tclauncher.config import GAME_EXE_RELPATH, ConfigManager
 from tclauncher.diagnostics import (
     format_launch_diagnostics,
@@ -19,6 +20,17 @@ from tclauncher.runner_linux import (
     running_steam,
     steam_install_kind,
     steam_preflight_issue,
+)
+
+# This whole file exercises runner_linux: umu/Proton argv and environment
+# construction, Steam-install detection under ~/.steam and Flatpak, copying the
+# steamclient bridge into a wine prefix, and killpg-based process-tree
+# termination. Windows dispatches to runner_windows and never imports any of
+# it (see tests/test_runner_windows.py for that half).
+pytestmark = pytest.mark.skipif(
+    platforms.IS_WINDOWS,
+    reason="exercises the umu/Proton launch path in runner_linux, which the "
+           "Windows launcher never imports",
 )
 
 

@@ -5,9 +5,12 @@ QObject) must stay alive until that event is delivered on the main thread.
 Freeing it on the pool thread crashes inside Shiboken. A crash aborts the
 process, so we run the scenario in a subprocess and assert a clean exit.
 """
+import os
 import subprocess
 import sys
 import textwrap
+
+from tclauncher import platforms
 
 SCENARIO = textwrap.dedent(
     """
@@ -37,12 +40,28 @@ SCENARIO = textwrap.dedent(
 )
 
 
+def _scenario_env() -> dict[str, str]:
+    """A deliberately bare environment -- the scenario must not need PATH.
+
+    Windows is the exception: CreateProcess hands the child a full env block
+    rather than inheriting one, and CPython/Qt startup reads %SYSTEMROOT% and
+    a temp directory out of it. Passing those through keeps the environment as
+    empty as it can be while still letting the interpreter start at all.
+    """
+    env = {"QT_QPA_PLATFORM": "offscreen", "PYTHONPATH": ".", "PATH": ""}
+    if platforms.IS_WINDOWS:
+        for key in ("SYSTEMROOT", "TEMP", "TMP"):
+            if key in os.environ:
+                env[key] = os.environ[key]
+    return env
+
+
 def test_worker_signals_survive_until_delivered():
     proc = subprocess.run(
         [sys.executable, "-c", SCENARIO],
         capture_output=True,
         text=True,
-        env={"QT_QPA_PLATFORM": "offscreen", "PYTHONPATH": ".", "PATH": ""},
+        env=_scenario_env(),
         timeout=60,
     )
     assert proc.returncode == 0, f"worker scenario crashed (rc={proc.returncode}): {proc.stderr[-2000:]}"

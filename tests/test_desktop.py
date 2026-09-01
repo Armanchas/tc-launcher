@@ -8,7 +8,19 @@ import os
 import stat
 import time
 
+import pytest
+
+from tclauncher import platforms
 from tclauncher.desktop import clean_child_env, open_path, open_url
+
+# NOTE: clean_child_env() is imported by runner_windows too, so its tests stay
+# unguarded and run on both platforms. Only the two tests that plant an
+# executable `xdg-open` shell script on PATH are Linux-only.
+_needs_xdg_open = pytest.mark.skipif(
+    platforms.IS_WINDOWS,
+    reason="plants an executable xdg-open shell script on PATH; Windows has no "
+           "xdg-open and shutil.which() only resolves PATHEXT extensions",
+)
 
 
 def test_clean_child_env_restores_pyinstaller_original():
@@ -33,6 +45,7 @@ def test_clean_child_env_drops_ld_library_path_without_original():
     assert cleaned["PATH"] == "/usr/bin"
 
 
+@_needs_xdg_open
 def test_open_path_spawns_xdg_open_with_clean_env(tmp_path, monkeypatch):
     record = tmp_path / "record.json"
     fake = tmp_path / "xdg-open"
@@ -61,6 +74,7 @@ def test_open_path_returns_false_without_xdg_open(tmp_path, monkeypatch):
     assert open_path(str(tmp_path)) is False
 
 
+@_needs_xdg_open
 def test_open_url_spawns_xdg_open_with_clean_env(tmp_path, monkeypatch):
     record = tmp_path / "record.json"
     fake = tmp_path / "xdg-open"

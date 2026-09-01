@@ -1,0 +1,35 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      # Both platforms always report. A Windows failure must not hide the
+      # Linux result -- reading the two side by side is the point.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # PySide6 imports at collection time (ui.main_window, ui.workers), and on
+      # a bare runner the Qt libs it links against are absent.
+      - name: Install Qt runtime deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0
+      # Editable is fine here: the PEP 660 import hook only defeats
+      # PyInstaller's static analysis, which is a build-time concern
+      # (scripts/build-windows.ps1 installs non-editable for that reason).
+      - name: Install
+        run: pip install -e ".[dev]"
+      # test_verify_compat.py skips here by design: it loads FileVerifier out
+      # of the ../prospect-og sibling checkout, which no runner has.
+      - name: Run tests
+        run: python -m pytest -q
