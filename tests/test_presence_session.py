@@ -243,7 +243,7 @@ def test_a_zero_inode_does_not_make_two_logs_look_identical(tmp_path, monkeypatc
         f.write(MAP_LINE.format("Station_P"))
     s._pump()
     assert s.current.key == "in_station"
-    handle_before = s._file
+    reopens_before = s._reopens
 
     real_stat = os.stat
 
@@ -253,10 +253,58 @@ def test_a_zero_inode_does_not_make_two_logs_look_identical(tmp_path, monkeypatc
 
     monkeypatch.setattr(os, "stat", zero_inode_stat)
     # A zero inode must read as "unknown", not as "different file". Asserting on
-    # the handle, not on state: a spurious reopen re-reads from offset 0 and
-    # lands on the same state anyway, so state alone cannot catch this bug.
+    # the re-read counter, not on state: a spurious restart re-reads from byte 0
+    # and lands on the same state anyway, so state alone cannot catch this bug.
     with open(log, "a") as f:
         f.write(MAP_LINE.format("MP_Map01_P"))
     s._pump()
-    assert s._file is handle_before, "a zero inode triggered a spurious reopen"
+    assert s._reopens == reopens_before, "a zero inode triggered a spurious re-read"
     assert s.current.key == "dropping_in"
+
+
+def test_the_tailer_holds_no_handle_between_polls(tmp_path):
+    """UE rotates Prospect.log to Prospect-backup-<time>.log on EVERY launch.
+
+    Windows refuses to rename a file that another process holds open, so a
+    tailer that kept the handle would block the game's own log rotation --
+    presence must never interfere with the game. Caught by Windows CI in
+    test_recreated_log_is_reread_from_the_start; pinned here as the actual
+    requirement rather than as a side effect of one rotation test.
+    """
+    log = tmp_path / "Prospect.log"
+    log.write_text(MAP_LINE.format("Station_P"))
+    ipc = FakeIPC()
+    s = _session(tmp_path, ipc)
+    s._pump()
+    with open(log, "a") as f:
+        f.write(MAP_LINE.format("MP_Map01_P"))
+    s._pump()
+    assert s.current.key == "dropping_in"
+
+    # The invariant, checkable on every platform: no persistent handle exists.
+    assert getattr(s, "_file", None) is None, "the tailer kept the log open"
+    # The behaviour it buys. Always succeeds on POSIX; on Windows this is the
+    # assertion that actually bites.
+    os.rename(log, tmp_path / "Prospect-backup-2026.09.01-00.00.00.log")
+    assert not log.exists()
+
+
+def test_reads_strip_the_carriage_returns_a_windows_log_carries(tmp_path):
+    """A Windows game writes CRLF. Reading binary -- required so offsets can be
+    compared against st_size -- keeps the \r that text mode used to strip.
+
+    Asserted on the text handed to the parser, not on derived state: every line
+    type we currently parse happens to survive a trailing \r (checked), so a
+    state-level assertion here could not fail. The \r still must not reach the
+    buffer -- the next parser added would be the one to break, on Windows only.
+    """
+    log = tmp_path / "Prospect.log"
+    log.write_bytes(b"")
+    ipc = FakeIPC()
+    s = _session(tmp_path, ipc)
+    s._pump()
+    with open(log, "ab") as f:
+        f.write(MAP_LINE.format("Station_P").replace("\n", "\r\n").encode())
+    text = s._read_new()
+    assert "\r" not in text, "a CRLF log leaked carriage returns into the parser"
+    assert text.endswith("'Station_P'.\n")

@@ -345,8 +345,12 @@ class PresenceSession:
         # state and flush on a timer rather than sending per transition.
         self.min_update_interval = min_update_interval
         self.current = LAUNCHING
-        self._file = None
+        self._offset = None
         self._inode = None
+        # Counts reads restarted from byte 0 (rotation or truncation). Exposed
+        # so tests can tell "kept reading" from "silently re-read the file",
+        # which produce the same visible state.
+        self._reopens = 0
         self._buffer = ""
         self._started_at = int(time.time())
         self._last_sent = None  # None = nothing sent yet, so never rate-limited
@@ -369,7 +373,6 @@ class PresenceSession:
             self.ipc.close()
         except Exception:
             logger.debug("Discord teardown failed", exc_info=True)
-        self._close_file()
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -381,52 +384,69 @@ class PresenceSession:
             self._stop.wait(self.poll_interval)
 
     def _pump(self) -> None:
-        self._ensure_open()
-        if self._file is not None:
-            self._buffer += self._file.read()
-            while "\n" in self._buffer:
-                line, self._buffer = self._buffer.split("\n", 1)
-                nxt = derive(self.current, line)
-                if nxt is not None:
-                    # Only a change of visible state restarts the elapsed
-                    # timer; matchmaking and squad lines update context alone.
-                    if nxt.key != self.current.key:
-                        self._started_at = int(time.time())
-                    # Draw a new flavour line only when the state actually
-                    # changes pool, so it cannot reshuffle mid-match; then
-                    # rebuild the line so a squad joining or filling shows up.
-                    if nxt.flavour != self.current.flavour:
-                        self._flavour_text = self._pick(
-                            nxt.flavour,
-                            avoid=self._last_flavour.get(nxt.flavour, ""))
-                        if nxt.flavour:
-                            self._last_flavour[nxt.flavour] = self._flavour_text
-                    self.current = with_flavour(nxt, self._flavour_text)
-                    self._pending = True
+        self._buffer += self._read_new()
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            nxt = derive(self.current, line)
+            if nxt is not None:
+                # Only a change of visible state restarts the elapsed
+                # timer; matchmaking and squad lines update context alone.
+                if nxt.key != self.current.key:
+                    self._started_at = int(time.time())
+                # Draw a new flavour line only when the state actually
+                # changes pool, so it cannot reshuffle mid-match; then
+                # rebuild the line so a squad joining or filling shows up.
+                if nxt.flavour != self.current.flavour:
+                    self._flavour_text = self._pick(
+                        nxt.flavour,
+                        avoid=self._last_flavour.get(nxt.flavour, ""))
+                    if nxt.flavour:
+                        self._last_flavour[nxt.flavour] = self._flavour_text
+                self.current = with_flavour(nxt, self._flavour_text)
+                self._pending = True
         self._flush()
 
-    def _ensure_open(self) -> None:
+    def _read_new(self) -> str:
+        """Text appended since the last poll. Holds NO handle between polls.
+
+        Deliberately open/read/close every time. On Windows a file with an open
+        handle cannot be renamed, and UE rotates Prospect.log to
+        Prospect-backup-<timestamp>.log on **every** launch -- so keeping it
+        open would block the game's own log rotation. Presence must never
+        interfere with the game, and one open/close per second costs nothing.
+
+        Binary, not text: offsets are compared against `st_size`, and a
+        text-mode `tell()` is an opaque cookie, not a byte count. Newlines are
+        normalised by hand for the same reason.
+        """
         try:
             stat = os.stat(self.log_path)
         except OSError:
-            return  # not created yet; keep polling
-        if self._file is None:
-            self._file = open(self.log_path, "r", encoding="utf-8", errors="replace")
+            return ""  # not created yet; keep polling
+        if self._offset is None:
             # Start at EOF so a stale log from a previous session is never
             # replayed as live state.
-            self._file.seek(0, os.SEEK_END)
+            self._offset = stat.st_size
             self._inode = stat.st_ino
-            return
+            return ""
         # The game recreates or truncates the log each launch.
         # A zero inode means "unknown" -- Windows synthesises st_ino from the
         # NTFS file index and it can be 0, which would make two different logs
         # compare equal and replay stale state. The size check carries it.
         rotated = (stat.st_ino and self._inode and stat.st_ino != self._inode)
-        if rotated or stat.st_size < self._file.tell():
-            self._close_file()
-            self._file = open(self.log_path, "r", encoding="utf-8", errors="replace")
+        if rotated or stat.st_size < self._offset:
+            self._offset = 0
             self._inode = stat.st_ino
             self._buffer = ""
+            self._reopens += 1
+        try:
+            with open(self.log_path, "rb") as f:
+                f.seek(self._offset)
+                chunk = f.read()
+                self._offset = f.tell()
+        except OSError:
+            return ""
+        return chunk.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
     def _flush(self) -> None:
         if not self._pending:
@@ -454,13 +474,6 @@ class PresenceSession:
             logger.debug("Discord set_activity failed", exc_info=True)
             self._pending = False
 
-    def _close_file(self) -> None:
-        if self._file is not None:
-            try:
-                self._file.close()
-            except OSError:
-                pass
-            self._file = None
 
 
 def start_presence(config) -> "PresenceSession | None":
