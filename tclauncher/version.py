@@ -8,4 +8,4 @@ and updater.is_newer() compares numerically, so this has to be strictly greater
 than every published release or the self-updater never offers anything.
 """
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
