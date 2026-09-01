@@ -1,7 +1,7 @@
 [project]
 name = "tc-launcher"
 dynamic = ["version"]
-description = "Linux launcher for The Cycle community servers"
+description = "Launcher for The Cycle community servers (Linux and Windows)"
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.11"

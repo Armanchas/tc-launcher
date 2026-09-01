@@ -21,10 +21,13 @@ from .platforms import IS_WINDOWS
 
 logger = logging.getLogger(__name__)
 
-# The CURRENT repo name. The rename to tc-launcher happens later; GitHub 301s
-# the old API path to the new one and requests follows redirects, so this
-# survives the rename -- whereas the new name would 404 until it happens.
-DEFAULT_REPO = "Armanchas/tc-launcher-linux"
+# The repo was renamed from tc-launcher-linux before the first release that
+# carried this updater, so nothing shipped ever pointed at the old path and no
+# installed launcher depends on GitHub's rename redirect. Keep it that way: if
+# this is ever renamed again, releases already in the wild WILL depend on that
+# redirect, and the redirect dies the moment anyone creates a repo at the old
+# name.
+DEFAULT_REPO = "Armanchas/tc-launcher"
 
 _API = "https://api.github.com/repos/{repo}/releases/latest"
 _TIMEOUT = 5
