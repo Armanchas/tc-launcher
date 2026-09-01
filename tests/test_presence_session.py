@@ -108,8 +108,17 @@ def test_recreated_log_is_reread_from_the_start(tmp_path):
     ipc = FakeIPC()
     s = _session(tmp_path, ipc)
     s._pump()
-    os.remove(log)
-    log.write_text(MAP_LINE.format("MP_Map01_P"))
+    # Build the replacement while the original still exists -- two live files
+    # cannot share an inode -- then swap it in. `os.remove` + recreate can reuse
+    # the just-freed inode: never on this dev box (0/200 tries) but readily on
+    # the CI runner's overlayfs, where this test failed and nowhere else. With a
+    # reused inode AND a larger replacement, neither the inode check nor the
+    # size check fires. Production is not exposed: the game *renames* the old
+    # log to Prospect-backup-<time>.log, so its inode stays alive and the new
+    # log necessarily gets a different one.
+    fresh = tmp_path / "Prospect.log.new"
+    fresh.write_text(MAP_LINE.format("MP_Map01_P"))
+    os.replace(fresh, log)
     s._pump()
     assert s.current.key == "dropping_in"
 
