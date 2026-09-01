@@ -111,7 +111,7 @@ the status bar as a link. There is no pop-up and no automatic download. Click
 it, confirm, and the launcher downloads the new build, closes, swaps itself, and
 restarts.
 
-- Nothing happens without your click. A failed check is silent.
+- Nothing happens without your click.
 - It will not update while the game is running. Close the game first.
 - If the launcher cannot write to its own folder, it offers a download link
   instead of failing partway.
