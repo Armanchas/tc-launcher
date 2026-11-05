@@ -173,6 +173,19 @@ note at the end of the Linux section.
 This one is not about Steam. Your launcher login has expired. Press Log in,
 sign in again, then Play.
 
+**"Not signed in" after the server's update**
+
+Expected once. When the community server moves to its new sign-in, sessions
+saved before the switch are not carried over. Log in with Steam again; your
+browser may finish without showing Steam's page.
+
+**"Couldn't reach the sign-in server" or "Couldn't confirm your mods with the server"**
+
+The launcher checks your session and reports your installed mods to the server
+right before the game starts, because the server refuses matchmaking without
+that report. Either message means that check did not get through. Your login
+is kept; wait a moment and press Play again.
+
 **The game closes right away**
 
 Read `~/.tclauncher/game.log` and look for `Client API initialized 1`, which

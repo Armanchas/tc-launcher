@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +57,14 @@ def default_game_dir() -> str:
 class ConfigManager:
     def __init__(self, config_file: str = CONFIG_FILE):
         self.config_file = config_file
+        # The session keep-alive saves from its own thread; saves share one
+        # temp file, so two at once would trample each other's write.
+        self._save_lock = threading.Lock()
         # Keys shared with prospect-og
         self.backend_data: dict | None = None
         self.server_discovery_addr: str | None = None
-        self.session_id: str = ""
+        self.session_id: str = ""      # legacy (/idp/*) session
+        self.access_token: str = ""    # OIDC session (server-repo launcher's key)
         self.refresh_token: str = ""
         self.exp: int = 0
         self.run_args: list[str] = []
@@ -85,6 +90,7 @@ class ConfigManager:
             self.backend_data = data.get("backend_data", None)
             self.server_discovery_addr = data.get("server_discovery_addr", None)
             self.session_id = data.get("session_id", "")
+            self.access_token = data.get("access_token", "")
             self.refresh_token = data.get("refresh_token", "")
             self.exp = data.get("exp", 0)
             self.run_args = data.get("run_args", [])
@@ -115,6 +121,7 @@ class ConfigManager:
             "backend_data": self.backend_data,
             "server_discovery_addr": self.server_discovery_addr,
             "session_id": self.session_id,
+            "access_token": self.access_token,
             "refresh_token": self.refresh_token,
             "exp": self.exp,
             "run_args": self.run_args,
@@ -130,14 +137,15 @@ class ConfigManager:
         }
         # Write-then-rename so a crash mid-write can't corrupt the config.
         tmp_path = self.config_file + ".tmp"
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2)
-        except BaseException:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            raise
-        os.replace(tmp_path, self.config_file)
+        with self._save_lock:
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, indent=2)
+            except BaseException:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                raise
+            os.replace(tmp_path, self.config_file)
 
     def game_exe(self) -> str:
         return os.path.join(self.game_dir, GAME_EXE_RELPATH)

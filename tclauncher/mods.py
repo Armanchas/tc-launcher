@@ -78,10 +78,18 @@ class ModManager:
         with open(self._mod_file(), "w", encoding="utf-8") as f:
             json.dump(self.installed_mods, f, indent=2)
 
-    def load_mods(self):
-        """Sync local state with the server: drop mods the server no longer lists."""
+    def load_mods(self) -> bool:
+        """Sync local state with the server: drop mods the server no longer lists.
+
+        Returns whether the server's list was fetched. A failed fetch prunes
+        nothing and keeps the last known list; without that, an unreachable
+        server deleted every installed mod.
+        """
         self._read_installed_mods()
-        self.remote_mods = self.backend.remote_mods()
+        remote = self.backend.remote_mods()
+        if remote is None:
+            return False
+        self.remote_mods = remote
 
         new_mods = {}
         for mod_id, mod in self.installed_mods.items():
@@ -91,6 +99,7 @@ class ModManager:
             self.uninstall_mod(mod)
         self.installed_mods = new_mods
         self._write_installed_mods()
+        return True
 
     def check_mod_integrity(self, local_mod: LocalModManifest, remote_mod: RemoteModManifest) -> bool:
         paths = [Path(file) for file in local_mod["files"]]
@@ -114,9 +123,24 @@ class ModManager:
             mods.append(Mod(mod_id, local_mod, remote_mod, status))
         return mods
 
-    def are_mods_installed(self) -> bool:
-        mods = self.get_mods_with_statuses()
+    def are_mods_installed(self, refresh: bool = True) -> bool:
+        mods = self.get_mods_with_statuses(refresh)
         return all(mod.status == ModStatus.UP_TO_DATE for mod in mods)
+
+    def attestation(self) -> str:
+        """The mod digest reported to the server (`PUT /launcher/attestation`).
+
+        Call only right after are_mods_installed() returned True. Then every
+        offered mod's installed files hash to its server `integrity`, so the
+        server's expected value -- manifest_digest over the offered mods'
+        integrity, skipping mods without one -- is exactly what hashing the
+        installation would give, without re-reading the files.
+        """
+        return verify.manifest_digest({
+            mod_id: mod["integrity"]
+            for mod_id, mod in self.remote_mods.items()
+            if mod.get("integrity")
+        })
 
     def get_mod_file_paths(self) -> set[Path]:
         paths = set()

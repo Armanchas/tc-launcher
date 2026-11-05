@@ -7,7 +7,7 @@ relative path, then file contents) and the algorithm (xxh128) must all match.
 
 import logging
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping
 
 from xxhash import xxh128
 
@@ -73,3 +73,18 @@ def get_file_xxh128(file_path: Path | str) -> str:
 
 def get_files_xxh128(base_dir: Path, all_paths: list[Path], on_progress_update: Callable | None = None) -> str:
     return _hash_paths(base_dir, all_paths, xxh128(), on_progress_update).hexdigest()
+
+
+def manifest_digest(entries: Mapping[str, str]) -> str:
+    """One hash over {mod id: state}, independent of the mapping's order.
+
+    Byte-compatible with prospect-og modkit's `manifest_digest`, which the
+    server uses for the mod attestation (tests/test_attestation_compat.py).
+    """
+    h = xxh128()
+    for mod_id in sorted(entries):
+        h.update(mod_id.encode())
+        h.update(b"\0")
+        h.update(entries[mod_id].encode())
+        h.update(b"\0")
+    return h.hexdigest()

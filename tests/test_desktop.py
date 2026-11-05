@@ -120,10 +120,14 @@ def test_initiate_login_opens_browser_via_sanitized_open_url(monkeypatch):
     class FakeConfig:
         server_discovery_addr = "https://discovery.example"
 
+    from tclauncher.oidc import Protocol
+
     sm = SessionManager(FakeConfig(), backend=None)
-    monkeypatch.setattr(sm, "_start_callback_server", lambda: None)
+    sm.protocol = Protocol.LEGACY
+    monkeypatch.setattr(sm, "_start_callback_server", lambda host: None)
     sm.redirect_url = "http://localhost:12345/auth_result"
     sm.server = object()  # pretend callback server is already running
+    sm._server_host = "localhost"
 
     sm.initiate_login(lambda: None)
 

@@ -100,13 +100,22 @@ class BackendClient:
 
     # --- mods / launcher update ---
 
-    def remote_mods(self) -> dict:
+    def remote_mods(self) -> dict | None:
+        """The server's mod list, or None if it could not be fetched.
+
+        None and {} mean different things: {} is a server offering no mods,
+        and ModManager prunes on it. A failed fetch must prune nothing.
+        """
         try:
             res = self.session.get(f"{self._discovery()}/launcher/mods", timeout=REQUEST_TIMEOUT)
-            return res.json()["items"]
+            items = res.json()["items"]
         except Exception as e:
             logger.exception(e)
-            return {}
+            return None
+        if not isinstance(items, dict):
+            logger.error("Server sent a mod list that is not a mapping: %r", type(items))
+            return None
+        return items
 
     def launcher_update_manifest(self) -> dict | None:
         try:

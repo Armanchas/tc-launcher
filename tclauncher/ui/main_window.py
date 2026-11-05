@@ -16,11 +16,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..auth import SessionManager
+from ..auth import LaunchAuth, SessionCheck, SessionKeepAlive, SessionManager
 from ..backend import BackendClient, ServerDiscoveryStatus
 from ..config import LAUNCHER_USERDIR, PROTOCOL_VERSION, ConfigManager
 from ..desktop import open_path
 from ..mods import ModManager
+from ..oidc import Protocol
 from ..presence import start_presence
 from ..runner import GAME_LOG, GameRunner, steam_preflight_issue
 from ..updater import (
@@ -39,6 +40,11 @@ from .theme import STATUS_COLORS, TEXT_DIM
 from .workers import run_worker
 
 logger = logging.getLogger(__name__)
+
+
+SIGNIN_UNREACHABLE = "Couldn't reach the sign-in server. Try again in a moment."
+MODS_NOT_CONFIRMED = "Couldn't confirm your mods with the server. Try again in a moment."
+MODS_UNAVAILABLE = "Couldn't get the mod list from the server. Try again in a moment."
 
 
 def primary_action(account_state: str, game_dir_ok: bool) -> str:
@@ -64,6 +70,7 @@ class MainWindow(QMainWindow):
         self.mod_manager = ModManager(config, self.backend)
         self.runner = GameRunner(config)
         self._presence = None
+        self._keepalive = None
 
         self._logged_in = False
         self._server_online = False
@@ -217,7 +224,7 @@ class MainWindow(QMainWindow):
                     self._status_hold = True
                 else:
                     self._poll_status()
-                    self._validate_session_async()
+                    self._detect_and_validate_async()
 
             run_worker(self.backend.discover, self.config.server_discovery_addr,
                        on_finished=on_discovered)
@@ -242,7 +249,7 @@ class MainWindow(QMainWindow):
     # --- account / session ---
 
     def _account_state(self) -> str:
-        if self.session_manager.has_active_session():
+        if self.session_manager.is_signed_in():
             return "signed_in"
         if self.session_manager.has_refresh_token():
             return "expired"
@@ -274,22 +281,24 @@ class MainWindow(QMainWindow):
             self.btn_play.setText("Log in with Steam")
         self._update_primary_enabled()
 
-    def _validate_session_async(self):
-        """Confirm a locally-valid session is still accepted by the server, so
-        the button never shows 'Play' for a session the backend has expired."""
-        if self._account_state() != "signed_in":
-            return
-
+    def _detect_and_validate_async(self):
+        """Learn which sign-in the server speaks, then confirm a stored session
+        is still accepted, so the button never shows 'Play' for a session the
+        server has ended. Under OIDC the check is a refresh."""
         def check():
-            return self.session_manager.is_valid_backend_session()
+            self.session_manager.detect_protocol()
+            if self._account_state() != "signed_in":
+                return None
+            return self.session_manager.validate()
 
-        def apply(valid):
-            # Only downgrade on a definite rejection; is_valid_backend_session
-            # also refreshes the token when it can, so a True keeps us signed in.
-            if not valid:
+        def apply(result):
+            # Only a definite refusal signs out, and quietly: after a server
+            # switches protocol that is the one expected re-login. The probe
+            # itself may have dropped a session of the other kind.
+            if result is SessionCheck.REFUSED:
                 self.session_manager.invalidate_session()
                 self.config.save()
-                self._refresh_account_ui()
+            self._refresh_account_ui()
 
         run_worker(check, on_finished=apply)
 
@@ -298,6 +307,30 @@ class MainWindow(QMainWindow):
         self._refresh_account_ui()
         self._poll_status()
 
+    def _release_status_hold(self):
+        """End a transient status message and resume population polling."""
+        if self._status_hold:
+            self._status_hold = False
+            self._poll_status()
+
+    def closeEvent(self, event):
+        """While an OIDC game session is kept alive, closing the launcher would
+        let the server session lapse 60 s later -- before a slow-starting game
+        signs in, or before it signs in again. Offer to minimise instead."""
+        if self._keepalive is not None and self._keepalive.is_running():
+            answer = QMessageBox.question(
+                self, "Game still running",
+                "The launcher keeps your sign-in alive while the game runs. "
+                "If you close it now, the game may fail to sign in.\n\n"
+                "Minimize the launcher instead?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+            )
+            if answer == QMessageBox.Yes:
+                self.showMinimized()
+                event.ignore()
+                return
+        super().closeEvent(event)
+
     def _release_login_hold(self):
         """Recovery if the browser login is abandoned: resume status polling."""
         if self._status_hold and not self._logged_in:
@@ -305,9 +338,13 @@ class MainWindow(QMainWindow):
             self._poll_status()
 
     def log_out(self):
+        token = self.config.refresh_token
         self.session_manager.invalidate_session()
         self.config.save()
         self._refresh_account_ui()
+        if token and self.session_manager.protocol is Protocol.OIDC:
+            # Best effort, never waited on: local sign-out already happened.
+            run_worker(self.session_manager.revoke, token)
 
     # --- status bar ---
 
@@ -489,6 +526,26 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Select a server first",
                                     "Choose a server, then log in with Steam.")
             return
+        # Probe on every login, not only when the startup probe failed: a
+        # launcher left open across the server's switch would otherwise send
+        # the browser to the deleted legacy endpoint. One GET. A failed probe
+        # keeps the protocol already known, so only a never-reached server stops here.
+        self._status_hold = True
+        self._set_status("Contacting the server…", "waiting")
+
+        def after_probe(protocol):
+            self._status_hold = False
+            if protocol is Protocol.UNKNOWN:
+                self._poll_status()
+                QMessageBox.information(self, "Sign-in server unreachable", SIGNIN_UNREACHABLE)
+                return
+            self._refresh_account_ui()
+            self._begin_login()
+
+        run_worker(self.session_manager.detect_protocol, on_finished=after_probe,
+                   on_failed=lambda e: after_probe(Protocol.UNKNOWN))
+
+    def _begin_login(self):
         self._status_hold = True
         self._set_status("Waiting for browser sign-in…", "waiting")
         QTimer.singleShot(120_000, self._release_login_hold)
@@ -514,16 +571,21 @@ class MainWindow(QMainWindow):
         self._set_status("Checking mods and session…", "waiting")
 
         def preflight():
-            if not self.mod_manager.are_mods_installed():
-                return "mods"
-            if not self.session_manager.is_valid_backend_session():
-                return "session"
-            return "ok"
+            # A fresh list is required: without one the gate below passes on
+            # an empty or stale list, and the game is refused at matchmaking.
+            if not self.mod_manager.load_mods():
+                return "mods_unavailable", ""
+            if not self.mod_manager.are_mods_installed(refresh=False):
+                return "mods", ""
+            # Only valid right after are_mods_installed() (see attestation()).
+            digest = self.mod_manager.attestation()
+            return self.session_manager.prepare_launch(digest), digest
 
         run_worker(preflight, on_finished=self._on_preflight_done,
                    on_failed=lambda e: self._launch_failed(str(e)))
 
-    def _on_preflight_done(self, result: str):
+    def _on_preflight_done(self, outcome: tuple):
+        result, digest = outcome
         self._status_hold = False
         if result == "mods":
             self._launch_failed(None)
@@ -531,7 +593,27 @@ class MainWindow(QMainWindow):
                                  "Failed to verify mod installations. Open 'Manage mods' and install "
                                  "missing mods or reinstall corrupted mods.")
             return
-        if result == "session":
+        if result == "mods_unavailable":
+            self._launch_failed(None)
+            QMessageBox.warning(self, "Mod list unavailable", MODS_UNAVAILABLE)
+            return
+        if result is LaunchAuth.SIGNED_OUT:
+            # The server switched sign-in; the old session was dropped. Quietly.
+            self._launch_failed(None)
+            self._refresh_account_ui()
+            self._status_hold = True
+            self._set_status("Log in with Steam to play", "waiting")
+            QTimer.singleShot(10_000, self._release_status_hold)
+            return
+        if result is LaunchAuth.AUTH_UNREACHABLE:
+            self._launch_failed(None)
+            QMessageBox.warning(self, "Sign-in server unreachable", SIGNIN_UNREACHABLE)
+            return
+        if result is LaunchAuth.ATTESTATION_FAILED:
+            self._launch_failed(None)
+            QMessageBox.warning(self, "Mods not confirmed", MODS_NOT_CONFIRMED)
+            return
+        if result is LaunchAuth.SESSION_REFUSED:
             self.session_manager.invalidate_session()
             self.config.save()
             self._refresh_account_ui()
@@ -548,6 +630,9 @@ class MainWindow(QMainWindow):
             self._launch_failed(str(e))
             return
         self._presence = start_presence(self.config)
+        if self.session_manager.protocol is Protocol.OIDC:
+            self._keepalive = SessionKeepAlive(self.session_manager, digest)
+            self._keepalive.start()
         self._launch_started_at = time.monotonic()
         self._update_primary_enabled()
         if first_run:
@@ -575,6 +660,9 @@ class MainWindow(QMainWindow):
         if self._presence is not None:
             self._presence.stop()
             self._presence = None
+        if self._keepalive is not None:
+            self._keepalive.stop()
+            self._keepalive = None
         self.showNormal()
         elapsed = time.monotonic() - getattr(self, "_launch_started_at", 0.0)
         self._status_hold = False
@@ -607,6 +695,11 @@ class MainWindow(QMainWindow):
             self.session_manager.invalidate_session()
             self.config.save()
             self._refresh_account_ui()
+            # A different server may speak the other sign-in protocol.
+            self.session_manager.protocol = Protocol.UNKNOWN
+            run_worker(self.session_manager.detect_protocol,
+                       on_finished=lambda _: self._refresh_account_ui())
+            self.mod_manager.remote_mods = {}  # the previous server's list
             run_worker(self.mod_manager.load_mods)
             self._status_hold = False
             self._poll_status()
