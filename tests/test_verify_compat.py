@@ -16,12 +16,12 @@ from tclauncher import verify
 
 # Sibling checkout next to this repo (see CLAUDE.md); absent on CI runners.
 PROSPECT_OG_LAUNCHER = (
-    Path(__file__).resolve().parents[2] / "prospect-og" / "launcher" / "launcher.py"
+    Path(__file__).resolve().parents[2] / "prospect-og-launcher" / "launcher" / "launcher.py"
 )
 
 requires_prospect_og = pytest.mark.skipif(
     not PROSPECT_OG_LAUNCHER.exists(),
-    reason="prospect-og sibling repo not present (hash-compat reference)",
+    reason="prospect-og-launcher sibling repo not present (hash-compat reference)",
 )
 
 
