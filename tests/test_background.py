@@ -60,3 +60,19 @@ def test_build_scripts_bundle_assets():
         assert '--add-data "$(pwd)/tclauncher/assets:tclauncher/assets"' in f.read()
     with open(os.path.join(ROOT, "scripts", "build-windows.ps1"), encoding="utf-8") as f:
         assert '--add-data "$root\\tclauncher\\assets;tclauncher\\assets"' in f.read()
+
+
+def test_top_left_is_shaded_for_the_wordmark(qapp, tmp_path):
+    """Bright art must not wash out the white wordmark: the corner behind it
+    is darkened, the opposite corner is left alone."""
+    white = QImage(400, 225, QImage.Format_RGB32)
+    white.fill(0xFFFFFF)
+    path = str(tmp_path / "white.png")
+    white.save(path)
+    widget = ArtBackground(path)
+    widget.resize(1100, 620)
+    shot = widget.grab().toImage()
+    behind_title = shot.pixelColor(60, 40).lightness()
+    top_right = shot.pixelColor(1060, 40).lightness()
+    assert behind_title < 140
+    assert top_right > 240

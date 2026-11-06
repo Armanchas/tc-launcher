@@ -89,7 +89,7 @@ QPushButton#primary {{
     background-color: {ACCENT};
     color: {ACCENT_TEXT};
     border: none;
-    border-radius: 10px;
+    border-radius: 26px;  /* a pill: exactly half btn_play's fixed 52px; Qt drops anything larger */
     font-size: 16px;
     font-weight: 700;
     letter-spacing: 1px;

@@ -279,7 +279,9 @@ class MainWindow(QMainWindow):
         dock_layout.addWidget(self.btn_settings)
         self.btn_play = QPushButton()
         self.btn_play.setObjectName("primary")
-        self.btn_play.setMinimumSize(220, 52)
+        # Fixed height: the pill radius in theme.py must be exactly half of it.
+        self.btn_play.setMinimumWidth(220)
+        self.btn_play.setFixedHeight(52)
         self.btn_play.setCursor(Qt.PointingHandCursor)
         self.btn_play.clicked.connect(self.on_primary_clicked)
         dock_layout.addWidget(self.btn_play)

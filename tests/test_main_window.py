@@ -190,3 +190,16 @@ def test_wordmark_says_storm_runners(window):
     win = window()
     texts = [l.text() for l in win.findChildren(QLabel) if l.objectName() == "subtitle"]
     assert texts == ["Storm Runners"]
+
+
+def test_play_button_is_a_pill(window):
+    """Qt drops a border-radius larger than half the height (it does not clamp
+    like CSS), so the pill needs a fixed height and a radius of exactly half."""
+    import re
+
+    from tclauncher.ui.theme import STYLESHEET
+
+    win = window()
+    radius = int(re.search(r"QPushButton#primary \{[^}]*border-radius: (\d+)px", STYLESHEET).group(1))
+    assert win.btn_play.minimumHeight() == win.btn_play.maximumHeight()
+    assert radius * 2 == win.btn_play.height()

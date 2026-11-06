@@ -8,7 +8,7 @@ tests/test_background.py fails if either script stops shipping it.
 import os
 
 from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPixmap
+from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from .theme import BG
@@ -61,3 +61,11 @@ class ArtBackground(QWidget):
         gradient.setColorAt(0.0, QColor(5, 8, 15, 0))
         gradient.setColorAt(1.0, QColor(5, 8, 15, 217))
         painter.fillRect(QRect(0, top, self.width(), self.height() - top), gradient)
+        # The wordmark sits top-left in white; bright art would swallow it.
+        # A soft dark fade from that corner keeps it readable on any image.
+        radius = max(self.width() * 0.42, 1.0)
+        corner = QRadialGradient(0, 0, radius)
+        corner.setColorAt(0.0, QColor(5, 8, 15, 190))
+        corner.setColorAt(0.55, QColor(5, 8, 15, 120))
+        corner.setColorAt(1.0, QColor(5, 8, 15, 0))
+        painter.fillRect(QRect(0, 0, int(radius) + 1, int(radius) + 1), corner)
