@@ -30,6 +30,6 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
       # test_verify_compat.py skips here by design: it loads FileVerifier out
-      # of the ../prospect-og sibling checkout, which no runner has.
+      # of the ../prospect-og-launcher sibling checkout, which no runner has.
       - name: Run tests
         run: python -m pytest -q

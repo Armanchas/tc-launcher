@@ -42,6 +42,11 @@ def steam_preflight_issue(config_compat: str = "") -> str | None:
     return _runner_module().steam_preflight_issue(config_compat)
 
 
+def steam_install_path() -> str | None:
+    """The Steam client's install directory on this platform, or None."""
+    return _runner_module().find_steam_install_path()
+
+
 def diagnostic_lines(env: dict, game_exe_dir: str) -> list[str]:
     """Platform-only rows for the game.log diagnostics block."""
     return _runner_module().diagnostic_lines(env, game_exe_dir)

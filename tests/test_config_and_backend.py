@@ -9,6 +9,7 @@ def test_config_roundtrip(tmp_path):
     config = ConfigManager(config_file=path)
     config.server_discovery_addr = "http://example.com"
     config.session_id = "abc"
+    config.access_token = "tok"
     config.run_args = ["-log"]
     config.env_vars = {"A": "1"}
     config.use_mangohud = True
@@ -18,6 +19,7 @@ def test_config_roundtrip(tmp_path):
     loaded.load()
     assert loaded.server_discovery_addr == "http://example.com"
     assert loaded.session_id == "abc"
+    assert loaded.access_token == "tok"
     assert loaded.run_args == ["-log"]
     assert loaded.env_vars == {"A": "1"}
     assert loaded.use_mangohud is True
@@ -38,6 +40,7 @@ def test_config_reads_prospect_og_style_file(tmp_path):
     config.load()
     assert config.server_discovery_addr == "http://server"
     assert config.refresh_token == "r"
+    assert config.access_token == ""  # key absent in a legacy-era file
     assert config.wine_prefix  # Linux default filled in
 
 
@@ -168,3 +171,53 @@ def test_a_user_set_id_still_wins(tmp_path):
     c = ConfigManager(config_file=str(path))
     c.load()
     assert c.discord_client_id == "999"
+
+
+def test_concurrent_saves_never_fail_or_corrupt(tmp_path):
+    """The keep-alive saves from its own thread while the GUI or a worker may
+    save too; a shared temp file let two writers trample each other."""
+    import threading
+
+    path = tmp_path / "config.json"
+    config = ConfigManager(config_file=str(path))
+    errors = []
+
+    def writer():
+        for _ in range(50):
+            try:
+                config.save()
+            except Exception as e:  # noqa: BLE001 -- the failure is the finding
+                errors.append(e)
+
+    threads = [threading.Thread(target=writer) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert json.loads(path.read_text())["exp"] == 0
+
+
+def test_gamescope_keys_roundtrip(tmp_path):
+    path = str(tmp_path / "config.json")
+    config = ConfigManager(config_file=path)
+    config.load()
+    assert config.use_gamescope is False and config.gamescope_args == ""
+    config.use_gamescope = True
+    config.gamescope_args = "-f"
+    config.save()
+    again = ConfigManager(config_file=path)
+    again.load()
+    assert again.use_gamescope is True and again.gamescope_args == "-f"
+
+
+def test_identity_keys_roundtrip(tmp_path):
+    path = str(tmp_path / "config.json")
+    config = ConfigManager(config_file=path)
+    config.load()
+    assert (config.steam_id, config.steam_name) == ("", "")
+    config.steam_id, config.steam_name = "76561198000000000", "Armin"
+    config.save()
+    again = ConfigManager(config_file=path)
+    again.load()
+    assert (again.steam_id, again.steam_name) == ("76561198000000000", "Armin")

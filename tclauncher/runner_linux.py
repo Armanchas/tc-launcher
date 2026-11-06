@@ -8,6 +8,7 @@ Steam preflight check and the strong preference for umu/Proton over raw Wine.
 import glob
 import logging
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -347,6 +348,11 @@ def diagnostic_lines(env: dict, game_exe_dir: str) -> list[str]:
     return lines
 
 
+def parse_gamescope_args(text: str) -> list[str]:
+    """Split the Gamescope arguments as typed; ValueError on bad quoting."""
+    return shlex.split(text)
+
+
 class GameRunner:
     def __init__(self, config: ConfigManager):
         self.config = config
@@ -439,6 +445,16 @@ class GameRunner:
             env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = steam_path
 
         argv = []
+        if self.config.use_gamescope:
+            if shutil.which("gamescope") is None:
+                raise RuntimeError("gamescope not found but the Gamescope option is enabled.")
+            try:
+                gamescope_args = parse_gamescope_args(self.config.gamescope_args)
+            except ValueError as e:
+                raise RuntimeError(f"Gamescope arguments can't be read: {e}") from e
+            # Gamescope wraps the whole chain; only the game runs inside it,
+            # never the first-run createprefix pass (_run_createprefix).
+            argv += ["gamescope", *gamescope_args, "--"]
         if self.config.use_gamemode:
             if shutil.which("gamemoderun") is None:
                 raise RuntimeError("gamemoderun not found but the GameMode option is enabled.")

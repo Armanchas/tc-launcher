@@ -43,11 +43,12 @@ somewhere like `C:\Program Files`, move it or run the launcher as administrator.
 
 ### First run
 
-1. **Select server**, using the community server's discovery URL. If you have
-   used the old launcher on this PC, this is already filled in.
+1. **Choose the server** under Settings (the cog) → Server, using the community
+   server's discovery URL. If you have used the old launcher on this PC, this is
+   already filled in.
 2. **Log in with Steam.** Your browser opens Steam's sign-in page. An existing
    session from the old launcher carries over and needs no new login.
-3. **Manage mods**, if the server uses them.
+3. **Install mods** from the Mods chip at the top right, if the server uses them.
 4. **Press Play.** While the game runs, the button reads **Stop game**.
 
 ---
@@ -86,10 +87,12 @@ once with the Locate link.
 ### First run
 
 1. **Locate your game files.** The folder is usually called `Release`. You only
-   need this before pressing Play, and Settings can set it too.
-2. **Select server**, using the community server's discovery URL.
+   need this before pressing Play, and Settings (the cog) can set it too.
+2. **Choose the server** under Settings → Server, using the community server's
+   discovery URL.
 3. **Log in with Steam** in the browser window that opens.
-4. **Pick a Proton version** in Settings. Use Refresh after installing one.
+4. **Pick a Proton version** under Settings → Proton. Use Refresh after
+   installing one.
 5. **Press Play**, with Steam running.
 
 > **The first launch is slow.** umu downloads the Steam Linux Runtime and Proton
@@ -106,9 +109,9 @@ settings, and restart it once.
 
 ## Updating
 
-The launcher checks for a new release at startup. If one exists, it says so in
-the status bar as a link. There is no pop-up and no automatic download. Click
-it, confirm, and the launcher downloads the new build, closes, swaps itself, and
+The launcher checks for a new release at startup. If one exists, an
+"Update to …" chip appears at the top right (and under Settings → About). There
+is no pop-up and no automatic download. Click it, confirm, and the launcher downloads the new build, closes, swaps itself, and
 restarts.
 
 - Nothing happens without your click.
@@ -118,17 +121,49 @@ restarts.
 
 ## Settings
 
-- **Game directory**, where the game lives
-- **Launch flags**, extra game arguments such as `-log`
-- **Environment variables**, applied to the game process
-- **Show game status on Discord**, on by default
+The cog next to Play opens Settings over the launcher. Changes save as you make
+them; press Esc, ✕ or click outside to close. A value the launcher can't read
+(for example launch flags with an unclosed quote) is shown in red and not saved.
 
-Linux only, hidden on Windows where the game runs natively:
+While the game is running, settings that would break it are locked until it
+closes: Server, game folder, Proton, prefix, umu-run, Gamescope, mod installs,
+and Log out.
+
+- **Game:** game folder, launch flags (e.g. `-log`), environment variables, and
+  **Show game status on Discord** (on by default)
+- **Mods:** each mod's status, with Install / Update / Reinstall
+- **Server:** the community server's discovery URL
+- **About:** launcher version, update, and **Open logs folder**
+
+Linux only (the **Proton** section), hidden on Windows where the game runs natively:
 
 - **Proton version**, auto-detected installs plus a manual path
 - **Wine prefix**, default `~/.tclauncher/prefix`
 - **umu-run path**, to override the detected one
 - **GameMode / MangoHud** launch wrappers
+- **Gamescope**, with its own arguments. The game runs as
+  `gamescope <args> -- gamemoderun mangohud umu-run …`. A working start on a
+  desktop: `-f -w 2560 -h 1440 --force-grab-cursor` (set `-w`/`-h` to your
+  resolution).
+  - Leave out `-e`: it expects Steam to run inside Gamescope and pick the
+    window, so on a desktop you get an empty window.
+  - Keep `--force-grab-cursor`: without it Gamescope doesn't capture the
+    mouse, so the camera stops at the screen edge and the cursor wanders onto
+    other monitors.
+  - Inside Gamescope, its `--mangoapp` argument usually works better than the
+    MangoHud toggle.
+
+## Play time and your Steam profile
+
+**Play time** and **Last played** in the bottom bar are counted on this computer
+from the moment the game starts until it closes, and kept in
+`~/.tclauncher/playtime.json`. They start at zero: play from before this
+version, or on another machine, isn't known.
+
+Once the community server uses its new sign-in, the bottom bar shows your Steam
+**name and avatar** (from Steam's own cache on your computer, else your public
+Steam profile). With the old sign-in the launcher is never told who signed in,
+so it shows a plain icon and "Signed in".
 
 ## Discord Rich Presence
 
@@ -140,11 +175,13 @@ identity. Turn it off in Settings. If Discord is not running, nothing happens.
 ## Files and logs
 
 Everything the launcher writes lives in `~/.tclauncher/`, which on Windows is
-`C:\Users\<you>\.tclauncher\`. The Logs link in the status bar opens it.
+`C:\Users\<you>\.tclauncher\`. Settings → About → Open logs folder opens it.
 
 | Path | Purpose |
 | --- | --- |
 | `config.json` | Settings and your saved session |
+| `playtime.json` | Your local play time |
+| `avatars/` | Your downloaded Steam avatar |
 | `launcher.log` | The launcher's own log |
 | `game.log` | Game output, plus a diagnostics block describing your setup |
 | `mods/` | Downloaded mod archives |
@@ -172,6 +209,19 @@ note at the end of the Linux section.
 
 This one is not about Steam. Your launcher login has expired. Press Log in,
 sign in again, then Play.
+
+**"Not signed in" after the server's update**
+
+Expected once. When the community server moves to its new sign-in, sessions
+saved before the switch are not carried over. Log in with Steam again; your
+browser may finish without showing Steam's page.
+
+**"Couldn't reach the sign-in server" or "Couldn't confirm your mods with the server"**
+
+The launcher checks your session and reports your installed mods to the server
+right before the game starts, because the server refuses matchmaking without
+that report. Either message means that check did not get through. Your login
+is kept; wait a moment and press Play again.
 
 **The game closes right away**
 
