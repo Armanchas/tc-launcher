@@ -15,6 +15,7 @@ import binascii
 import hashlib
 import json
 import logging
+import re
 import secrets
 import time
 from dataclasses import dataclass
@@ -209,6 +210,30 @@ def _claims(id_token: str) -> dict:
     if not isinstance(claims, dict):
         raise TokenRefused("The sign-in answer carried an unreadable ID token.")
     return claims
+
+
+_STEAM_ID = re.compile(r"\d{17}")
+_NAME_MAX = 64
+
+
+def identity(id_token: str) -> tuple[str, str]:
+    """(steam_id, name) from the ID token's profile claims; ("", "") if unreadable.
+
+    The steam_id is used as a file name and in a URL (avatar.py), so only a
+    17-digit SteamID64 passes; anything else is "".
+    """
+    try:
+        claims = _claims(id_token)
+    except TokenRefused:
+        return "", ""
+    raw_id = claims.get("steam_id")
+    steam_id = ""
+    if isinstance(raw_id, (str, int)) and not isinstance(raw_id, bool) \
+            and _STEAM_ID.fullmatch(str(raw_id)):
+        steam_id = str(raw_id)
+    raw_name = claims.get("name")
+    name = raw_name.strip()[:_NAME_MAX] if isinstance(raw_name, str) else ""
+    return steam_id, name
 
 
 def check_id_token(id_token: str, *, issuer: str, now: float | None = None) -> None:

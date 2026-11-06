@@ -424,3 +424,59 @@ def test_reprobe_that_drops_a_legacy_session_signs_out_quietly(config, monkeypat
     monkeypatch.setattr(oidc, "probe", lambda s, base: (Protocol.OIDC, ISSUER))
     monkeypatch.setattr(oidc, "refresh", lambda *a, **k: pytest.fail("nothing to refresh"))
     assert manager.prepare_launch("d") is LaunchAuth.SIGNED_OUT
+
+
+# --- identity (steam_id + name) ---
+
+STEAM_ID = "76561198000000000"
+
+
+def _id_token(**claims):
+    import base64
+    import json
+    body = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
+    return f"e30.{body}.sig"
+
+
+def _tokens_with_identity(n=2, steam_id=STEAM_ID, name="Armin"):
+    return Tokens(access_token=f"a{n}", refresh_token=f"r{n}", expires_in=60,
+                  id_token=_id_token(steam_id=steam_id, name=name))
+
+
+def test_store_sets_identity(config):
+    _manager(config)._store(_tokens_with_identity())
+    assert (config.steam_id, config.steam_name) == (STEAM_ID, "Armin")
+    assert (_saved(config).steam_id, _saved(config).steam_name) == (STEAM_ID, "Armin")
+
+
+def test_refresh_without_id_token_keeps_identity(config):
+    manager = _manager(config)
+    manager._store(_tokens_with_identity())
+    manager._store(Tokens(access_token="a3", refresh_token="r3", expires_in=60, id_token=""))
+    assert (config.steam_id, config.steam_name) == (STEAM_ID, "Armin")
+
+
+def test_invalidate_clears_identity(config):
+    manager = _manager(config)
+    manager._store(_tokens_with_identity())
+    manager.invalidate_session()
+    assert (config.steam_id, config.steam_name) == ("", "")
+
+
+def test_legacy_login_clears_identity(config, monkeypatch):
+    config.steam_id, config.steam_name = STEAM_ID, "Armin"
+    manager = _manager(config, Protocol.LEGACY)
+    monkeypatch.setattr(manager.backend, "exchange_code",
+                        lambda code: {"success": True, "session_id": "s", "refresh_token": "r", "exp": 1})
+    monkeypatch.setattr(manager, "_shutdown_server", lambda: None)
+    ok, _ = manager._complete_login("c")
+    assert ok
+    assert (config.steam_id, config.steam_name) == ("", "")
+
+
+def test_probe_drop_clears_identity(config, monkeypatch):
+    _oidc_session(config)
+    config.steam_id, config.steam_name = STEAM_ID, "Armin"
+    monkeypatch.setattr(oidc, "probe", lambda s, base: (Protocol.LEGACY, None))
+    SessionManager(config, BackendClient(config)).detect_protocol()
+    assert (_saved(config).steam_id, _saved(config).steam_name) == ("", "")

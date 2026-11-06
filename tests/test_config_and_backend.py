@@ -196,3 +196,28 @@ def test_concurrent_saves_never_fail_or_corrupt(tmp_path):
         t.join()
     assert errors == []
     assert json.loads(path.read_text())["exp"] == 0
+
+
+def test_gamescope_keys_roundtrip(tmp_path):
+    path = str(tmp_path / "config.json")
+    config = ConfigManager(config_file=path)
+    config.load()
+    assert config.use_gamescope is False and config.gamescope_args == ""
+    config.use_gamescope = True
+    config.gamescope_args = "-f"
+    config.save()
+    again = ConfigManager(config_file=path)
+    again.load()
+    assert again.use_gamescope is True and again.gamescope_args == "-f"
+
+
+def test_identity_keys_roundtrip(tmp_path):
+    path = str(tmp_path / "config.json")
+    config = ConfigManager(config_file=path)
+    config.load()
+    assert (config.steam_id, config.steam_name) == ("", "")
+    config.steam_id, config.steam_name = "76561198000000000", "Armin"
+    config.save()
+    again = ConfigManager(config_file=path)
+    again.load()
+    assert (again.steam_id, again.steam_name) == ("76561198000000000", "Armin")

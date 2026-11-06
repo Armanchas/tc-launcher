@@ -1,8 +1,10 @@
 import logging
 import time
+from datetime import datetime
+from urllib.parse import urlparse
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -20,8 +22,11 @@ from ..auth import LaunchAuth, SessionCheck, SessionKeepAlive, SessionManager
 from ..backend import BackendClient, ServerDiscoveryStatus
 from ..config import LAUNCHER_USERDIR, PROTOCOL_VERSION, ConfigManager
 from ..desktop import open_path
+from ..avatar import resolve_avatar, valid_steam_id
 from ..mods import ModManager
 from ..oidc import Protocol
+from ..platforms import steam_install_path
+from ..playtime import PLAYTIME_FILE, PlaySession, PlayTimeStore, format_last_played, format_play_time
 from ..presence import start_presence
 from ..runner import GAME_LOG, GameRunner, steam_preflight_issue
 from ..updater import (
@@ -33,10 +38,9 @@ from ..updater import (
     update_offer,
 )
 from ..version import APP_VERSION
-from .mods_dialog import ModsDialog
-from .server_dialog import ServerDialog
-from .settings_dialog import SettingsDialog
-from .theme import STATUS_COLORS, TEXT_DIM
+from .background import ArtBackground
+from .settings_overlay import SettingsOverlay
+from .theme import STATUS_COLORS, SURFACE_HI, TEXT
 from .workers import run_worker
 
 logger = logging.getLogger(__name__)
@@ -45,6 +49,53 @@ logger = logging.getLogger(__name__)
 SIGNIN_UNREACHABLE = "Couldn't reach the sign-in server. Try again in a moment."
 MODS_NOT_CONFIRMED = "Couldn't confirm your mods with the server. Try again in a moment."
 MODS_UNAVAILABLE = "Couldn't get the mod list from the server. Try again in a moment."
+
+
+AVATAR_SIZE = 40
+
+
+def account_title(state: str, steam_name: str) -> str:
+    """The account block's first line. The name only exists on OIDC sessions
+    (the ID token's profile claims); legacy sign-in never says who it is."""
+    if state == "signed_in":
+        return steam_name or "Signed in"
+    if state == "expired":
+        return "Session expired — sign in again"
+    return "Not signed in"
+
+
+def round_avatar(source: QPixmap, size: int) -> QPixmap:
+    scaled = source.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+    out = QPixmap(size, size)
+    out.fill(Qt.transparent)
+    painter = QPainter(out)
+    painter.setRenderHint(QPainter.Antialiasing)
+    path = QPainterPath()
+    path.addEllipse(0, 0, size, size)
+    painter.setClipPath(path)
+    painter.drawPixmap((size - scaled.width()) // 2, (size - scaled.height()) // 2, scaled)
+    painter.end()
+    return out
+
+
+def placeholder_avatar(name: str, size: int) -> QPixmap:
+    """A filled circle with the name's initial, or a plain person glyph."""
+    out = QPixmap(size, size)
+    out.fill(Qt.transparent)
+    painter = QPainter(out)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(SURFACE_HI))
+    painter.drawEllipse(0, 0, size, size)
+    painter.setPen(QColor(TEXT))
+    font = painter.font()
+    font.setPixelSize(int(size * 0.45))
+    font.setBold(True)
+    painter.setFont(font)
+    letter = name.strip()[:1].upper() if name.strip() else "\U0001F464"
+    painter.drawText(out.rect(), Qt.AlignCenter, letter)
+    painter.end()
+    return out
 
 
 def primary_action(account_state: str, game_dir_ok: bool) -> str:
@@ -71,6 +122,15 @@ class MainWindow(QMainWindow):
         self.runner = GameRunner(config)
         self._presence = None
         self._keepalive = None
+        self._mods_attention = False
+        self._mods_busy = False
+        self._avatar_id: str | None = None
+        self.playtime = PlayTimeStore(PLAYTIME_FILE)
+        self.playtime.load()
+        self._play_session: PlaySession | None = None
+        self._playtime_timer = QTimer(self)
+        self._playtime_timer.setInterval(60_000)
+        self._playtime_timer.timeout.connect(self._checkpoint_play_time)
 
         self._logged_in = False
         self._server_online = False
@@ -78,16 +138,17 @@ class MainWindow(QMainWindow):
         self._update_info = None
 
         self.setWindowTitle("The Cycle Launcher")
-        self.setMinimumSize(460, 500)
-        self.resize(480, 520)
+        self.setMinimumSize(860, 500)
+        self.resize(1100, 620)
 
         self._build_ui()
+        self._refresh_play_time()
 
         self.login_succeeded.connect(self._on_login_success)
         self.game_exited.connect(self._on_game_exit)
 
         self._refresh_account_ui()
-        self._set_status("Select a server to begin", "offline")
+        self._set_status("Select a server to begin", "offline", population=True)
 
         self.status_timer = QTimer(self)
         self.status_timer.setInterval(5000)
@@ -104,48 +165,43 @@ class MainWindow(QMainWindow):
     # --- layout ---
 
     def _build_ui(self):
-        central = QWidget()
+        central = ArtBackground()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(28, 24, 28, 16)
-        root.setSpacing(18)
+        root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(10)
 
-        # Header
+        # Top: wordmark left, chips right
+        top = QHBoxLayout()
+        top.setSpacing(8)
         header = QVBoxLayout()
-        header.setSpacing(2)
+        header.setSpacing(0)
         title = QLabel("THE CYCLE")
         title.setObjectName("title")
-        title.setAlignment(Qt.AlignHCenter)
-        subtitle = QLabel("Community Launcher")
+        subtitle = QLabel("Storm Runners")
         subtitle.setObjectName("subtitle")
-        subtitle.setAlignment(Qt.AlignHCenter)
         header.addWidget(title)
         header.addWidget(subtitle)
-        root.addLayout(header)
+        top.addLayout(header)
+        top.addStretch()
+        self._update_href = "#"
+        self.chip_update = self._chip("", self._on_update_chip)
+        self.chip_update.hide()
+        top.addWidget(self.chip_update, 0, Qt.AlignTop)
+        self.chip_online = self._chip("● Select a server to begin",
+                                      lambda: self.overlay.open_section("server"))
+        top.addWidget(self.chip_online, 0, Qt.AlignTop)
+        self.chip_mods = self._chip("Mods", lambda: self.overlay.open_section("mods"))
+        top.addWidget(self.chip_mods, 0, Qt.AlignTop)
+        root.addLayout(top)
 
-        # Account card
-        card = QFrame()
-        card.setObjectName("card")
-        card_layout = QHBoxLayout(card)
-        card_layout.setContentsMargins(14, 12, 12, 12)
-        card_layout.setSpacing(10)
-        self.account_dot = QLabel("●")
-        card_layout.addWidget(self.account_dot)
-        self.account_label = QLabel("Not signed in")
-        card_layout.addWidget(self.account_label)
-        card_layout.addStretch()
-        self.btn_logout = QPushButton("Log out")
-        self.btn_logout.setObjectName("link")
-        self.btn_logout.setCursor(Qt.PointingHandCursor)
-        self.btn_logout.clicked.connect(self.log_out)
-        card_layout.addWidget(self.btn_logout)
-        root.addWidget(card)
+        root.addStretch()
 
         # Game files notice — visible while no valid game directory is set
         self.game_notice = QFrame()
-        self.game_notice.setObjectName("card")
+        self.game_notice.setObjectName("banner")
         notice_layout = QHBoxLayout(self.game_notice)
-        notice_layout.setContentsMargins(14, 12, 12, 12)
+        notice_layout.setContentsMargins(14, 8, 10, 8)
         notice_layout.setSpacing(10)
         notice_dot = QLabel("●")
         notice_dot.setStyleSheet(f"color: {STATUS_COLORS['waiting']}; font-size: 13px;")
@@ -161,58 +217,142 @@ class MainWindow(QMainWindow):
         self.game_notice.hide()
         root.addWidget(self.game_notice)
 
-        root.addStretch()
+        # Transient status, right-aligned over the Play button
+        status_row = QHBoxLayout()
+        status_row.addStretch()
+        self.status_line = QLabel("")
+        self.status_line.setObjectName("statusLine")
+        self.status_line.hide()
+        status_row.addWidget(self.status_line)
+        root.addLayout(status_row)
 
-        # Primary action
+        # The bottom bar
+        dock = QFrame()
+        dock.setObjectName("dock")
+        dock_layout = QHBoxLayout(dock)
+        dock_layout.setContentsMargins(14, 10, 12, 10)
+        dock_layout.setSpacing(14)
+
+        self.avatar = QLabel()
+        self.avatar.setObjectName("avatar")
+        self.avatar.setFixedSize(AVATAR_SIZE, AVATAR_SIZE)
+        dock_layout.addWidget(self.avatar)
+        account = QVBoxLayout()
+        account.setSpacing(0)
+        self.account_title = QLabel("Not signed in")
+        self.account_title.setObjectName("accountTitle")
+        account.addWidget(self.account_title)
+        server_row = QHBoxLayout()
+        server_row.setSpacing(4)
+        self.account_server = QLabel("")
+        self.account_server.setObjectName("dim")
+        server_row.addWidget(self.account_server)
+        self.btn_logout = QPushButton("Log out")
+        self.btn_logout.setObjectName("link")
+        self.btn_logout.setCursor(Qt.PointingHandCursor)
+        self.btn_logout.clicked.connect(self.log_out)
+        server_row.addWidget(self.btn_logout)
+        server_row.addStretch()
+        account.addLayout(server_row)
+        dock_layout.addLayout(account)
+        dock_layout.addStretch(1)
+
+        self.play_time_value = QLabel("")
+        self.last_played_value = QLabel("")
+        for caption, value in (("PLAY TIME", self.play_time_value),
+                               ("LAST PLAYED", self.last_played_value)):
+            stat = QVBoxLayout()
+            stat.setSpacing(0)
+            label = QLabel(caption)
+            label.setObjectName("statLabel")
+            value.setObjectName("statValue")
+            stat.addWidget(label)
+            stat.addWidget(value)
+            dock_layout.addLayout(stat)
+        dock_layout.addStretch(1)
+
+        self.btn_settings = QPushButton("⚙")
+        self.btn_settings.setObjectName("cog")
+        self.btn_settings.setToolTip("Settings")
+        self.btn_settings.setCursor(Qt.PointingHandCursor)
+        self.btn_settings.clicked.connect(self.open_settings_dialog)
+        dock_layout.addWidget(self.btn_settings)
         self.btn_play = QPushButton()
         self.btn_play.setObjectName("primary")
-        self.btn_play.setMinimumHeight(52)
+        self.btn_play.setMinimumSize(220, 52)
         self.btn_play.setCursor(Qt.PointingHandCursor)
         self.btn_play.clicked.connect(self.on_primary_clicked)
-        root.addWidget(self.btn_play)
+        dock_layout.addWidget(self.btn_play)
+        root.addWidget(dock)
 
-        # Secondary actions
-        secondary = QHBoxLayout()
-        secondary.setSpacing(10)
-        for text, slot in (
-            ("Select server", self.open_server_dialog),
-            ("Manage mods", self.open_mods_dialog),
-            ("Settings", self.open_settings_dialog),
-        ):
-            btn = QPushButton(text)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(slot)
-            secondary.addWidget(btn)
-        root.addLayout(secondary)
+        # Settings draw over everything; created last so it stacks on top.
+        self.overlay = SettingsOverlay(self.config, self.backend, self.mod_manager, central)
+        self.overlay.closed.connect(self._refresh_account_ui)
+        self.overlay.server_changed.connect(self._on_server_changed)
+        self.overlay.mods_checked.connect(self._set_mods_attention)
+        self.overlay.mods_busy.connect(self._on_mods_busy)
+        self.overlay.open_logs_requested.connect(lambda: self._open_host_path(LAUNCHER_USERDIR))
+        self.overlay.update_requested.connect(self._on_update_chip)
 
-        root.addStretch()
+    def _chip(self, text: str, slot) -> QPushButton:
+        chip = QPushButton(text)
+        chip.setObjectName("chip")
+        chip.setCursor(Qt.PointingHandCursor)
+        chip.clicked.connect(slot)
+        return chip
 
-        # Status bar
-        status = QHBoxLayout()
-        status.setSpacing(8)
-        self.status_dot = QLabel("●")
-        status.addWidget(self.status_dot)
-        self.status_label = QLabel("Select a server to begin")
-        status.addWidget(self.status_label)
-        status.addStretch()
-        btn_logs = QPushButton("Logs")
-        btn_logs.setObjectName("link")
-        btn_logs.setCursor(Qt.PointingHandCursor)
-        btn_logs.clicked.connect(lambda: self._open_host_path(LAUNCHER_USERDIR))
-        status.addWidget(btn_logs)
-        self.update_link = QLabel()
-        self.update_link.setObjectName("link")
-        # Handled in-process (download + swap), so Qt must not hand the href to
-        # a browser; the external-link branch supplies its own real URL.
-        self.update_link.setOpenExternalLinks(False)
-        self.update_link.setVisible(False)
-        self.update_link.setCursor(Qt.PointingHandCursor)
-        self.update_link.linkActivated.connect(self._on_update_link)
-        status.addWidget(self.update_link)
-        version = QLabel(f"v{APP_VERSION}")
-        version.setObjectName("dim")
-        status.addWidget(version)
-        root.addLayout(status)
+    def _on_mods_busy(self, busy: bool):
+        self._mods_busy = busy
+        self._update_primary_enabled()
+
+    def _set_mods_attention(self, attention: bool):
+        self._mods_attention = attention
+        self.chip_mods.setText("Mods ⚠" if attention else "Mods")
+
+    # --- play time ---
+
+    def _refresh_play_time(self):
+        self.play_time_value.setText(format_play_time(self.playtime.total_seconds))
+        self.last_played_value.setText(
+            format_last_played(self.playtime.last_played, datetime.now()))
+
+    def _checkpoint_play_time(self):
+        if self._play_session is not None:
+            self._play_session.checkpoint()
+        self._refresh_play_time()
+
+    def _finish_play_time(self):
+        self._playtime_timer.stop()
+        if self._play_session is not None:
+            self._play_session.finish()
+            self._play_session = None
+        self._refresh_play_time()
+
+    # --- avatar ---
+
+    def _refresh_avatar(self, state: str):
+        """OIDC sessions carry a steam_id; legacy ones never do, and we do not
+        guess (the wrong person's face is worse than a placeholder)."""
+        steam_id = self.config.steam_id if state == "signed_in" else ""
+        if not valid_steam_id(steam_id):
+            self._avatar_id = None
+            self.avatar.setPixmap(placeholder_avatar("", AVATAR_SIZE))
+            return
+        if self._avatar_id == steam_id:
+            return
+        self._avatar_id = steam_id
+        self.avatar.setPixmap(placeholder_avatar(self.config.steam_name, AVATAR_SIZE))
+        run_worker(resolve_avatar, steam_id, session=self.backend.session,
+                   steam_dir=steam_install_path(),
+                   on_finished=lambda path, sid=steam_id: self._set_avatar(sid, path))
+
+    def _set_avatar(self, steam_id: str, path: str | None):
+        if steam_id != self._avatar_id or not path:
+            return
+        pixmap = QPixmap(path)
+        if not pixmap.isNull():
+            self.avatar.setPixmap(round_avatar(pixmap, AVATAR_SIZE))
+
 
     # --- startup ---
 
@@ -260,23 +400,17 @@ class MainWindow(QMainWindow):
         game_dir_ok = self.config.has_valid_game_dir()
         self._primary_action = primary_action(state, game_dir_ok)
         self.game_notice.setVisible(not game_dir_ok)
+        self.account_title.setText(account_title(state, self.config.steam_name))
+        addr = self.config.server_discovery_addr
+        self.account_server.setText((urlparse(addr).netloc or addr) if addr else "No server selected")
+        self._refresh_avatar(state)
         if state == "signed_in":
             self._logged_in = True
-            self.account_dot.setStyleSheet(f"color: {STATUS_COLORS['online']}; font-size: 13px;")
-            self.account_label.setText("Signed in with Steam")
             self.btn_logout.show()
             self.btn_play.setText("Play" if self._primary_action == "play"
                                   else "Locate game files…")
-        elif state == "expired":
-            self._logged_in = False
-            self.account_dot.setStyleSheet(f"color: {STATUS_COLORS['waiting']}; font-size: 13px;")
-            self.account_label.setText("Session expired — sign in again")
-            self.btn_logout.hide()
-            self.btn_play.setText("Log in with Steam")
         else:
             self._logged_in = False
-            self.account_dot.setStyleSheet(f"color: {TEXT_DIM}; font-size: 13px;")
-            self.account_label.setText("Not signed in")
             self.btn_logout.hide()
             self.btn_play.setText("Log in with Steam")
         self._update_primary_enabled()
@@ -329,6 +463,7 @@ class MainWindow(QMainWindow):
                 self.showMinimized()
                 event.ignore()
                 return
+        self._finish_play_time()
         super().closeEvent(event)
 
     def _release_login_hold(self):
@@ -348,14 +483,32 @@ class MainWindow(QMainWindow):
 
     # --- status bar ---
 
-    def _set_status(self, text: str, state: str):
-        self.status_label.setText(text)
-        self.status_dot.setStyleSheet(f"color: {STATUS_COLORS.get(state, STATUS_COLORS['offline'])}; font-size: 13px;")
+    def _set_status(self, text: str, state: str, population: bool = False):
+        """Population (server reachable, players online) goes to the online
+        chip; everything else is a transient message over the Play button.
+        Both drive _server_online exactly as the single status bar did."""
+        color = STATUS_COLORS.get(state, STATUS_COLORS["offline"])
+        if population:
+            self.chip_online.setText(f"● {text}")
+            # A plain QPushButton cannot colour one glyph; the chip's left
+            # edge carries the state colour instead.
+            self.chip_online.setStyleSheet(f"QPushButton#chip {{ border-left: 3px solid {color}; }}")
+            self.status_line.hide()
+        else:
+            self.status_line.setText(text)
+            self.status_line.setStyleSheet(f"border-left: 3px solid {color};")
+            self.status_line.show()
         self._server_online = state == "online"
         self._update_primary_enabled()
 
+
     def _update_primary_enabled(self):
-        if self.runner.is_running():
+        running = self.runner.is_running()
+        # The lock-while-playing rule (spec): risky settings and Log out wait
+        # until the game has closed.
+        self.overlay.set_game_running(running)
+        self.btn_logout.setEnabled(not running)
+        if running:
             self.btn_play.setText("Stop game")
             self.btn_play.setEnabled(True)
             return
@@ -364,7 +517,9 @@ class MainWindow(QMainWindow):
             # Picking a folder needs neither a server nor a session.
             self.btn_play.setEnabled(True)
         elif action == "play":
-            self.btn_play.setEnabled(self._server_online)
+            # Not mid mod-install: preflight's load_mods() would rewrite
+            # mods.json under it.
+            self.btn_play.setEnabled(self._server_online and not self._mods_busy)
         else:
             # Login needs a server (its OpenID URL comes from the discovery addr).
             self.btn_play.setEnabled(bool(self.config.server_discovery_addr))
@@ -373,14 +528,14 @@ class MainWindow(QMainWindow):
         if self._status_hold or self.runner.is_running():
             return
         if self.config.backend_data is None:
-            self._set_status("Select a server to begin", "offline")
+            self._set_status("Select a server to begin", "offline", population=True)
             return
 
         def apply(data):
             if data is None:
-                self._set_status("Server offline", "offline")
+                self._set_status("Server offline", "offline", population=True)
             else:
-                self._set_status(f"{data['online']} players online", "online")
+                self._set_status(f"{data['online']} players online", "online", population=True)
 
         run_worker(self.backend.server_status, on_finished=apply)
 
@@ -401,15 +556,19 @@ class MainWindow(QMainWindow):
                 self._set_status(
                     f"Version {info.version} is available — click to update",
                     "waiting")
-            self.update_link.setText(f"<a href='#'>Update to {info.version}</a>")
+            self._update_href = "#"
+            text = f"Update to {info.version}"
         else:
             # Unwritable install directory: offer the download instead of
             # failing at the swap with the whole file already on disk.
-            self.update_link.setText(
-                f"<a href='https://github.com/{DEFAULT_REPO}/releases/latest'>"
-                f"Version {info.version} available</a>"
-            )
-        self.update_link.setVisible(True)
+            self._update_href = f"https://github.com/{DEFAULT_REPO}/releases/latest"
+            text = f"Version {info.version} available"
+        self.chip_update.setText(f"⬆ {text}")
+        self.chip_update.setVisible(True)
+        self.overlay.set_update_text(text)
+
+    def _on_update_chip(self):
+        self._on_update_link(self._update_href)
 
     def _on_update_link(self, href: str):
         """'#' is our in-place update; a real URL goes to the browser."""
@@ -445,7 +604,8 @@ class MainWindow(QMainWindow):
         # Beside the target, NOT in %TEMP%: same-volume, so the helper's move is
         # an atomic rename. can_replace() already proved this directory writable.
         dest = staging_path(bundle)
-        self.update_link.setVisible(False)
+        self.chip_update.setVisible(False)
+        self.overlay.set_update_text(None)
         self._status_hold = True
         self._set_status("Downloading update…", "waiting")
         run_worker(download, info.url, dest,
@@ -479,7 +639,7 @@ class MainWindow(QMainWindow):
 
     def _update_failed(self, message: str):
         self._status_hold = False
-        self.update_link.setVisible(self._update_info is not None)
+        self.chip_update.setVisible(self._update_info is not None)
         QMessageBox.warning(self, "Update failed",
                             f"Could not install the update:\n\n{message}")
 
@@ -523,8 +683,7 @@ class MainWindow(QMainWindow):
 
     def _start_login(self):
         if not self.config.server_discovery_addr:
-            QMessageBox.information(self, "Select a server first",
-                                    "Choose a server, then log in with Steam.")
+            self.overlay.open_section("server")
             return
         # Probe on every login, not only when the startup probe failed: a
         # launcher left open across the server's switch would otherwise send
@@ -588,15 +747,17 @@ class MainWindow(QMainWindow):
         result, digest = outcome
         self._status_hold = False
         if result == "mods":
+            self._set_mods_attention(True)
             self._launch_failed(None)
             QMessageBox.critical(self, "Mods verification failed",
-                                 "Failed to verify mod installations. Open 'Manage mods' and install "
-                                 "missing mods or reinstall corrupted mods.")
+                                 "Failed to verify mod installations. Open Mods (top right) and "
+                                 "install missing mods or reinstall corrupted mods.")
             return
         if result == "mods_unavailable":
             self._launch_failed(None)
             QMessageBox.warning(self, "Mod list unavailable", MODS_UNAVAILABLE)
             return
+        self._set_mods_attention(False)  # the check just passed
         if result is LaunchAuth.SIGNED_OUT:
             # The server switched sign-in; the old session was dropped. Quietly.
             self._launch_failed(None)
@@ -634,6 +795,9 @@ class MainWindow(QMainWindow):
             self._keepalive = SessionKeepAlive(self.session_manager, digest)
             self._keepalive.start()
         self._launch_started_at = time.monotonic()
+        self._play_session = PlaySession(self.playtime)
+        self._play_session.start()
+        self._playtime_timer.start()
         self._update_primary_enabled()
         if first_run:
             self._set_status(
@@ -663,6 +827,7 @@ class MainWindow(QMainWindow):
         if self._keepalive is not None:
             self._keepalive.stop()
             self._keepalive = None
+        self._finish_play_time()
         self.showNormal()
         elapsed = time.monotonic() - getattr(self, "_launch_started_at", 0.0)
         self._status_hold = False
@@ -685,35 +850,24 @@ class MainWindow(QMainWindow):
             if box.clickedButton() is open_btn:
                 self._open_host_path(GAME_LOG)
 
-    # --- dialogs ---
+    # --- settings overlay ---
 
-    def open_server_dialog(self):
-        dialog = ServerDialog(self.config, self.backend, self)
-        dialog.exec()
-        if dialog.accepted_new_server:
-            # Match prospect-og: a new server means a new identity provider.
-            self.session_manager.invalidate_session()
-            self.config.save()
-            self._refresh_account_ui()
-            # A different server may speak the other sign-in protocol.
-            self.session_manager.protocol = Protocol.UNKNOWN
-            run_worker(self.session_manager.detect_protocol,
-                       on_finished=lambda _: self._refresh_account_ui())
-            self.mod_manager.remote_mods = {}  # the previous server's list
-            run_worker(self.mod_manager.load_mods)
-            self._status_hold = False
-            self._poll_status()
-
-    def open_mods_dialog(self):
-        if not self.config.has_valid_game_dir():
-            QMessageBox.critical(self, "Game directory not set",
-                                 "Locate your game files first — use the notice on the "
-                                 "main screen or set the directory in Settings.")
-            return
-        ModsDialog(self.mod_manager, self).exec()
+    def _on_server_changed(self):
+        # Match prospect-og: a new server means a new identity provider.
+        self.session_manager.invalidate_session()
+        self.config.save()
+        self._refresh_account_ui()
+        # A different server may speak the other sign-in protocol.
+        self.session_manager.protocol = Protocol.UNKNOWN
+        run_worker(self.session_manager.detect_protocol,
+                   on_finished=lambda _: self._refresh_account_ui())
+        self.mod_manager.remote_mods = {}  # the previous server's list
+        self._set_mods_attention(False)    # unknown until the next check
+        run_worker(self.mod_manager.load_mods)
+        self._status_hold = False
+        self._poll_status()
 
     def open_settings_dialog(self):
-        dialog = SettingsDialog(self.config, self)
-        dialog.exec()
-        # Settings can change the game directory; re-derive notice/button state.
-        self._refresh_account_ui()
+        """The cog. Closing the overlay re-runs _refresh_account_ui (the game
+        directory may have changed)."""
+        self.overlay.open_section("game")

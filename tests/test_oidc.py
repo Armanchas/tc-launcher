@@ -56,11 +56,12 @@ def _b64(obj) -> str:
     return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
 
 
-def make_id_token(iss=ISSUER, aud="launcher", exp=None, iat=None, sub="player", drop=()):
+def make_id_token(iss=ISSUER, aud="launcher", exp=None, iat=None, sub="player", drop=(), extra=None):
     now = int(time.time())
     claims = {"iss": iss, "aud": aud, "sub": sub,
               "exp": now + 60 if exp is None else exp,
               "iat": now if iat is None else iat}
+    claims.update(extra or {})
     for key in drop:
         claims.pop(key)
     return f"{_b64({'alg': 'EdDSA'})}.{_b64(claims)}.sig"
@@ -247,3 +248,33 @@ def test_attest_puts_json_with_bearer():
 def test_attest_failures_are_unavailable(answer):
     with pytest.raises(OidcUnavailable):
         oidc.attest(FakeSession(answer), BASE, access_token="a", digest="d")
+
+
+# --- identity (steam_id + name from the profile scope) ---
+
+def test_identity_reads_claims():
+    token = make_id_token(extra={"steam_id": "76561198000000000", "name": " Armin "})
+    assert oidc.identity(token) == ("76561198000000000", "Armin")
+
+
+def test_identity_int_steam_id_ok():
+    token = make_id_token(extra={"steam_id": 76561198000000000, "name": "A"})
+    assert oidc.identity(token) == ("76561198000000000", "A")
+
+
+@pytest.mark.parametrize("bad", ["../../x", "123", "", None, 7656119800000000012, True, ["765611980000000000"]])
+def test_identity_rejects_bad_steam_id(bad):
+    token = make_id_token(extra={"steam_id": bad, "name": "A"})
+    assert oidc.identity(token)[0] == ""
+
+
+def test_identity_name_is_bounded():
+    token = make_id_token(extra={"steam_id": "76561198000000000", "name": "x" * 200})
+    assert len(oidc.identity(token)[1]) == 64
+    token = make_id_token(extra={"steam_id": "76561198000000000", "name": 5})
+    assert oidc.identity(token)[1] == ""
+
+
+def test_identity_garbage_token():
+    assert oidc.identity("x") == ("", "")
+    assert oidc.identity("") == ("", "")

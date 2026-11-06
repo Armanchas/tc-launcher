@@ -67,6 +67,8 @@ class ConfigManager:
         self.access_token: str = ""    # OIDC session (server-repo launcher's key)
         self.refresh_token: str = ""
         self.exp: int = 0
+        self.steam_id: str = ""        # from the OIDC ID token; cleared with the session
+        self.steam_name: str = ""
         self.run_args: list[str] = []
         # Linux-only keys
         self.game_dir: str = ""
@@ -76,6 +78,8 @@ class ConfigManager:
         self.env_vars: dict[str, str] = {}
         self.use_gamemode: bool = False
         self.use_mangohud: bool = False
+        self.use_gamescope: bool = False
+        self.gamescope_args: str = ""   # raw text as typed; split at launch
         self.discord_presence: bool = True
         self.discord_client_id: str = DEFAULT_DISCORD_CLIENT_ID
 
@@ -93,6 +97,8 @@ class ConfigManager:
             self.access_token = data.get("access_token", "")
             self.refresh_token = data.get("refresh_token", "")
             self.exp = data.get("exp", 0)
+            self.steam_id = data.get("steam_id", "")
+            self.steam_name = data.get("steam_name", "")
             self.run_args = data.get("run_args", [])
             self.game_dir = data.get("game_dir", "")
             self.proton_path = data.get("proton_path", "")
@@ -101,6 +107,8 @@ class ConfigManager:
             self.env_vars = data.get("env_vars", {})
             self.use_gamemode = data.get("use_gamemode", False)
             self.use_mangohud = data.get("use_mangohud", False)
+            self.use_gamescope = data.get("use_gamescope", False)
+            self.gamescope_args = data.get("gamescope_args", "")
             self.discord_presence = data.get("discord_presence", True)
             # An empty stored value means "unset", not "disabled" -- existing
             # Linux configs already carry this key, often blank.
@@ -124,6 +132,8 @@ class ConfigManager:
             "access_token": self.access_token,
             "refresh_token": self.refresh_token,
             "exp": self.exp,
+            "steam_id": self.steam_id,
+            "steam_name": self.steam_name,
             "run_args": self.run_args,
             "game_dir": self.game_dir,
             "proton_path": self.proton_path,
@@ -132,6 +142,8 @@ class ConfigManager:
             "env_vars": self.env_vars,
             "use_gamemode": self.use_gamemode,
             "use_mangohud": self.use_mangohud,
+            "use_gamescope": self.use_gamescope,
+            "gamescope_args": self.gamescope_args,
             "discord_presence": self.discord_presence,
             "discord_client_id": self.discord_client_id,
         }

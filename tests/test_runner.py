@@ -572,3 +572,71 @@ def test_install_steam_bridge_no_legacycompat_is_not_fatal(tmp_path):
     assert "legacycompat not found" in summary
     dest = prefix / "drive_c" / "Program Files (x86)" / "Steam" / "steamclient64.dll"
     assert not dest.exists()
+
+
+# --- Gamescope -------------------------------------------------------------
+
+def _which_all(name):
+    return f"/usr/bin/{name}"
+
+
+def test_gamescope_wraps_the_whole_chain(config, monkeypatch):
+    monkeypatch.setattr("tclauncher.runner_linux.shutil.which", _which_all)
+    config.use_gamemode = config.use_mangohud = config.use_gamescope = True
+    config.gamescope_args = "-W 1920 -H 1080 -f"
+    argv, _ = GameRunner(config).build_command()
+    assert argv[:7] == ["gamescope", "-W", "1920", "-H", "1080", "-f", "--"]
+    assert argv[7:9] == ["gamemoderun", "mangohud"]
+    assert argv[9] == config.umu_path
+
+
+def test_gamescope_off_by_default(config, monkeypatch):
+    monkeypatch.setattr("tclauncher.runner_linux.shutil.which", _which_all)
+    assert config.use_gamescope is False and config.gamescope_args == ""
+    argv, _ = GameRunner(config).build_command()
+    assert "gamescope" not in argv
+
+
+def test_gamescope_missing_binary_raises(config, monkeypatch):
+    monkeypatch.setattr("tclauncher.runner_linux.shutil.which",
+                        lambda name: None if name == "gamescope" else _which_all(name))
+    config.use_gamescope = True
+    with pytest.raises(RuntimeError, match="gamescope not found but the Gamescope option is enabled."):
+        GameRunner(config).build_command()
+
+
+def test_gamescope_bad_args_raise(config, monkeypatch):
+    monkeypatch.setattr("tclauncher.runner_linux.shutil.which", _which_all)
+    config.use_gamescope = True
+    config.gamescope_args = '-W "1920'
+    with pytest.raises(RuntimeError, match="Gamescope arguments"):
+        GameRunner(config).build_command()
+
+
+def test_createprefix_is_not_wrapped(config, monkeypatch, tmp_path):
+    import threading
+
+    monkeypatch.setattr("tclauncher.runner_linux.shutil.which", _which_all)
+    monkeypatch.setattr("tclauncher.runner_linux.GAME_LOG", str(tmp_path / "game.log"))
+    monkeypatch.setattr("tclauncher.runner_linux.install_steam_bridge", lambda *a: "stub")
+    config.use_gamescope = True
+    calls = []
+    done = threading.Event()
+
+    class FakeProcess:
+        returncode = 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(argv, **kwargs):
+        calls.append(list(argv))
+        return FakeProcess()
+
+    monkeypatch.setattr("tclauncher.runner_linux.subprocess.Popen", fake_popen)
+    runner = GameRunner(config)
+    monkeypatch.setattr(runner, "needs_first_run_setup", lambda: len(calls) == 0)
+    runner.launch(on_exit=done.set)
+    assert done.wait(5)
+    assert calls[0] == [config.umu_path, "createprefix"]
+    assert calls[1][0] == "gamescope"

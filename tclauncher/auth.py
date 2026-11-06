@@ -207,6 +207,8 @@ class SessionManager:
             return False, data.get("message", "Unknown error")
         self.config.session_id = data["session_id"]
         self.config.access_token = ""
+        # The legacy protocol never says who signed in.
+        self.config.steam_id = self.config.steam_name = ""
         self.config.refresh_token = data["refresh_token"]
         self.config.exp = data["exp"]
         self.config.save()
@@ -265,12 +267,18 @@ class SessionManager:
         self.config.access_token = ""
         self.config.refresh_token = ""
         self.config.exp = 0
+        self.config.steam_id = ""
+        self.config.steam_name = ""
 
     def _store(self, tokens: Tokens):
         self.config.access_token = tokens.access_token
         self.config.refresh_token = tokens.refresh_token
         self.config.exp = int(time.time()) + tokens.expires_in
         self.config.session_id = ""
+        # A refresh answer may come without an ID token: keep the last identity.
+        steam_id, name = oidc.identity(tokens.id_token)
+        if steam_id:
+            self.config.steam_id, self.config.steam_name = steam_id, name
         self.config.save()
 
     def _refresh(self):
