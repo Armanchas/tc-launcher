@@ -619,6 +619,11 @@ def test_createprefix_is_not_wrapped(config, monkeypatch, tmp_path):
     monkeypatch.setattr("tclauncher.runner_linux.shutil.which", _which_all)
     monkeypatch.setattr("tclauncher.runner_linux.GAME_LOG", str(tmp_path / "game.log"))
     monkeypatch.setattr("tclauncher.runner_linux.install_steam_bridge", lambda *a: "stub")
+    # Popen is patched process-wide, so anything else launch() spawns would be
+    # recorded as a "launch". The diagnostics block runs `pgrep -x steam` when
+    # no Steam is running (every CI runner); it is not under test here.
+    monkeypatch.setattr("tclauncher.runner_linux.running_steam", lambda: None)
+    monkeypatch.setattr("tclauncher.runner_linux.format_launch_diagnostics", lambda *a, **k: "")
     config.use_gamescope = True
     calls = []
     done = threading.Event()
