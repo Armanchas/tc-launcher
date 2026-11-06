@@ -1,7 +1,8 @@
 """Mod install/uninstall/integrity logic (no UI), ported from prospect-og.
 
 Local install state lives in mods.json inside the game directory; downloaded
-archives are cached under ~/.tclauncher/mods.
+archives are cached under ~/.tclauncher/mods, and only each mod's current
+version is kept there (prune_cache).
 """
 
 import json
@@ -99,7 +100,37 @@ class ModManager:
             self.uninstall_mod(mod)
         self.installed_mods = new_mods
         self._write_installed_mods()
+        self.prune_cache()
         return True
+
+    @staticmethod
+    def _archive_name(mod: RemoteModManifest) -> str:
+        return f"{mod['id'].replace('/', '_')}_{mod['version']}.zip"
+
+    def prune_cache(self):
+        """Delete cached archives no mod can use any more.
+
+        Kept: the server's current version of each offered mod (a repair
+        re-extracts it without a download) and the installed version (until
+        an update replaces it). Everything else is an old version or another
+        server's mod; at ~100 MB per tc_update release it adds up fast. Call
+        only with a freshly fetched remote list. Never raises.
+        """
+        keep = {self._archive_name(m) for m in self.remote_mods.values()}
+        keep |= {self._archive_name(m) for m in self.installed_mods.values()}
+        try:
+            names = os.listdir(self.cache_dir)
+        except OSError:
+            return
+        for name in names:
+            path = os.path.join(self.cache_dir, name)
+            if name in keep or not name.endswith(".zip") or not os.path.isfile(path):
+                continue
+            try:
+                os.remove(path)
+                logger.info("Removed old mod archive %s", name)
+            except OSError as e:
+                logger.warning("Couldn't remove old mod archive %s: %s", name, e)
 
     def check_mod_integrity(self, local_mod: LocalModManifest, remote_mod: RemoteModManifest) -> bool:
         paths = [Path(file) for file in local_mod["files"]]
@@ -162,10 +193,10 @@ class ModManager:
         files = self._download_and_extract(mod.remote, on_progress)
         self.installed_mods[mod.id] = {**mod.remote, "files": files}
         self._write_installed_mods()
+        self.prune_cache()
 
     def _download_and_extract(self, mod: RemoteModManifest, on_progress: Callable | None = None) -> list[str]:
-        filename = f"{mod['id'].replace('/', '_')}_{mod['version']}.zip"
-        cache_path = os.path.join(self.cache_dir, filename)
+        cache_path = os.path.join(self.cache_dir, self._archive_name(mod))
 
         def _cached_hash_ok(path: str, expected_hash: str) -> bool:
             h = verify.get_file_xxh128(path)

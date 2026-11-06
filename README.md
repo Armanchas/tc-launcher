@@ -184,7 +184,7 @@ Everything the launcher writes lives in `~/.tclauncher/`, which on Windows is
 | `avatars/` | Your downloaded Steam avatar |
 | `launcher.log` | The launcher's own log |
 | `game.log` | Game output, plus a diagnostics block describing your setup |
-| `mods/` | Downloaded mod archives |
+| `mods/` | Downloaded mod archives (only the current version of each mod is kept) |
 | `prefix/` | Wine/Proton prefix (Linux only) |
 
 The game's own log is at `%LOCALAPPDATA%\Prospect\Saved\Logs\Prospect.log` on
