@@ -460,3 +460,42 @@ def test_about_has_discord_invite(make, monkeypatch):
     overlay.open_section("about")
     overlay.about.discord_button.click()
     assert opened == ["https://discord.gg/8hNgwXc9m2"]
+
+
+@pytest.mark.parametrize("button, url", [
+    ("github_button", "https://github.com/Armanchas/tc-launcher"),
+    ("discord_button", "https://discord.gg/8hNgwXc9m2"),
+    ("website_button", "https://tc-stormrunners.xyz/"),
+])
+def test_about_links_open_in_the_browser(make, monkeypatch, button, url):
+    opened = []
+    monkeypatch.setattr(settings_sections, "open_url", opened.append)
+    overlay = make()
+    getattr(overlay.about, button).click()
+    assert opened == [url]
+
+
+def test_about_game_logs_button(make):
+    overlay = make()
+    game = []
+    overlay.open_game_logs_requested.connect(lambda: game.append(1))
+    overlay.about.game_logs_button.click()
+    assert game == [1]
+
+
+def test_about_says_what_is_running_and_who_made_it(make):
+    from tclauncher.version import APP_VERSION
+
+    overlay = make()
+    assert APP_VERSION in overlay.about.info.text()
+    assert ("Windows" if settings_sections.IS_WINDOWS else "Linux") in overlay.about.info.text()
+    assert overlay.about.credit_after.text() == "by the TC: Storm Runners team"
+    assert not overlay.about.heart.pixmap().isNull()
+
+
+def test_about_shows_the_team_logo_and_only_version_and_platform(make):
+    overlay = make()
+    assert not overlay.about.logo.pixmap().isNull()
+    assert "Protocol" not in overlay.about.info.text()
+    assert "Version" in overlay.about.info.text()
+    assert "Platform" in overlay.about.info.text()
