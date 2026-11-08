@@ -1,10 +1,11 @@
 import logging
+import os
 import time
 from datetime import datetime
 from urllib.parse import urlparse
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPainterPath, QPixmap
+from PySide6.QtCore import QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -25,7 +26,7 @@ from ..desktop import open_path
 from ..avatar import resolve_avatar, valid_steam_id
 from ..mods import ModManager
 from ..oidc import Protocol
-from ..platforms import steam_install_path
+from ..platforms import game_log_path, steam_install_path
 from ..playtime import PLAYTIME_FILE, PlaySession, PlayTimeStore, format_last_played, format_play_time
 from ..presence import start_presence
 from ..runner import GAME_LOG, GameRunner, steam_preflight_issue
@@ -38,9 +39,10 @@ from ..updater import (
     update_offer,
 )
 from ..version import APP_VERSION
+from . import icons
 from .background import ArtBackground
 from .settings_overlay import SettingsOverlay
-from .theme import STATUS_COLORS, SURFACE_HI, TEXT
+from .theme import STATUS_COLORS, SURFACE_HI, TEXT, TEXT_DIM
 from .workers import run_worker
 
 logger = logging.getLogger(__name__)
@@ -51,7 +53,13 @@ MODS_NOT_CONFIRMED = "Couldn't confirm your mods with the server. Try again in a
 MODS_UNAVAILABLE = "Couldn't get the mod list from the server. Try again in a moment."
 
 
+#: The player count refreshes this often while the game runs (5 s otherwise).
+PLAYING_POLL_SECONDS = 60
+
 AVATAR_SIZE = 40
+CHIP_ICON_SIZE = 16
+CHIP_DOT_SIZE = 12
+COG_ICON_SIZE = 24
 
 
 def account_title(state: str, steam_name: str) -> str:
@@ -79,7 +87,7 @@ def round_avatar(source: QPixmap, size: int) -> QPixmap:
 
 
 def placeholder_avatar(name: str, size: int) -> QPixmap:
-    """A filled circle with the name's initial, or a plain person glyph."""
+    """A filled circle with the name's initial, or the person icon."""
     out = QPixmap(size, size)
     out.fill(Qt.transparent)
     painter = QPainter(out)
@@ -87,13 +95,17 @@ def placeholder_avatar(name: str, size: int) -> QPixmap:
     painter.setPen(Qt.NoPen)
     painter.setBrush(QColor(SURFACE_HI))
     painter.drawEllipse(0, 0, size, size)
-    painter.setPen(QColor(TEXT))
-    font = painter.font()
-    font.setPixelSize(int(size * 0.45))
-    font.setBold(True)
-    painter.setFont(font)
-    letter = name.strip()[:1].upper() if name.strip() else "\U0001F464"
-    painter.drawText(out.rect(), Qt.AlignCenter, letter)
+    if name.strip():
+        painter.setPen(QColor(TEXT))
+        font = painter.font()
+        font.setPixelSize(int(size * 0.45))
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(out.rect(), Qt.AlignCenter, name.strip()[:1].upper())
+    else:
+        inset = size * 0.22
+        icons.paint(painter, icons.USER, TEXT,
+                    QRectF(inset, inset, size - 2 * inset, size - 2 * inset))
     painter.end()
     return out
 
@@ -150,6 +162,7 @@ class MainWindow(QMainWindow):
         self._refresh_account_ui()
         self._set_status("Select a server to begin", "offline", population=True)
 
+        self._last_status_poll = 0.0
         self.status_timer = QTimer(self)
         self.status_timer.setInterval(5000)
         self.status_timer.timeout.connect(self._poll_status)
@@ -188,8 +201,9 @@ class MainWindow(QMainWindow):
         self.chip_update = self._chip("", self._on_update_chip)
         self.chip_update.hide()
         top.addWidget(self.chip_update, 0, Qt.AlignTop)
-        self.chip_online = self._chip("● Select a server to begin",
+        self.chip_online = self._chip("Select a server to begin",
                                       lambda: self.overlay.open_section("server"))
+        icons.apply(self.chip_online, icons.DOT, TEXT_DIM, CHIP_DOT_SIZE, filled=True)
         top.addWidget(self.chip_online, 0, Qt.AlignTop)
         self.chip_mods = self._chip("Mods", lambda: self.overlay.open_section("mods"))
         top.addWidget(self.chip_mods, 0, Qt.AlignTop)
@@ -203,8 +217,8 @@ class MainWindow(QMainWindow):
         notice_layout = QHBoxLayout(self.game_notice)
         notice_layout.setContentsMargins(14, 8, 10, 8)
         notice_layout.setSpacing(10)
-        notice_dot = QLabel("●")
-        notice_dot.setStyleSheet(f"color: {STATUS_COLORS['waiting']}; font-size: 13px;")
+        notice_dot = QLabel()
+        notice_dot.setPixmap(icons.pixmap(icons.DOT, STATUS_COLORS["waiting"], 12, filled=True))
         notice_layout.addWidget(notice_dot)
         notice_text = QLabel("Game files not set — the install folder is usually named 'Release'")
         notice_text.setWordWrap(True)
@@ -271,7 +285,8 @@ class MainWindow(QMainWindow):
             dock_layout.addLayout(stat)
         dock_layout.addStretch(1)
 
-        self.btn_settings = QPushButton("⚙")
+        self.btn_settings = QPushButton()
+        icons.apply(self.btn_settings, icons.COG, TEXT, COG_ICON_SIZE)
         self.btn_settings.setObjectName("cog")
         self.btn_settings.setToolTip("Settings")
         self.btn_settings.setCursor(Qt.PointingHandCursor)
@@ -294,6 +309,7 @@ class MainWindow(QMainWindow):
         self.overlay.mods_checked.connect(self._set_mods_attention)
         self.overlay.mods_busy.connect(self._on_mods_busy)
         self.overlay.open_logs_requested.connect(lambda: self._open_host_path(LAUNCHER_USERDIR))
+        self.overlay.open_game_logs_requested.connect(self._open_game_logs)
         self.overlay.update_requested.connect(self._on_update_chip)
 
     def _chip(self, text: str, slot) -> QPushButton:
@@ -309,7 +325,10 @@ class MainWindow(QMainWindow):
 
     def _set_mods_attention(self, attention: bool):
         self._mods_attention = attention
-        self.chip_mods.setText("Mods ⚠" if attention else "Mods")
+        if attention:
+            icons.apply(self.chip_mods, icons.WARNING, STATUS_COLORS["waiting"], CHIP_ICON_SIZE)
+        else:
+            self.chip_mods.setIcon(QIcon())
 
     # --- play time ---
 
@@ -491,11 +510,11 @@ class MainWindow(QMainWindow):
         Both drive _server_online exactly as the single status bar did."""
         color = STATUS_COLORS.get(state, STATUS_COLORS["offline"])
         if population:
-            self.chip_online.setText(f"● {text}")
-            # A plain QPushButton cannot colour one glyph; the chip's left
-            # edge carries the state colour instead.
+            self.chip_online.setText(text)
+            icons.apply(self.chip_online, icons.DOT, color, CHIP_DOT_SIZE, filled=True)
             self.chip_online.setStyleSheet(f"QPushButton#chip {{ border-left: 3px solid {color}; }}")
-            self.status_line.hide()
+            if not self.runner.is_running():  # "Game running…" stays up during play
+                self.status_line.hide()
         else:
             self.status_line.setText(text)
             self.status_line.setStyleSheet(f"border-left: 3px solid {color};")
@@ -527,11 +546,16 @@ class MainWindow(QMainWindow):
             self.btn_play.setEnabled(bool(self.config.server_discovery_addr))
 
     def _poll_status(self):
-        if self._status_hold or self.runner.is_running():
+        if self._status_hold:
+            return
+        # Quieter during play: the launcher is usually minimised then.
+        now = time.monotonic()
+        if self.runner.is_running() and now - self._last_status_poll < PLAYING_POLL_SECONDS:
             return
         if self.config.backend_data is None:
             self._set_status("Select a server to begin", "offline", population=True)
             return
+        self._last_status_poll = now
 
         def apply(data):
             if data is None:
@@ -565,7 +589,8 @@ class MainWindow(QMainWindow):
             # failing at the swap with the whole file already on disk.
             self._update_href = f"https://github.com/{DEFAULT_REPO}/releases/latest"
             text = f"Version {info.version} available"
-        self.chip_update.setText(f"⬆ {text}")
+        self.chip_update.setText(text)
+        icons.apply(self.chip_update, icons.UPDATE, TEXT, CHIP_ICON_SIZE)
         self.chip_update.setVisible(True)
         self.overlay.set_update_text(text)
 
@@ -815,6 +840,16 @@ class MainWindow(QMainWindow):
         self._poll_status()
         if message:
             QMessageBox.critical(self, "Launch Error", message)
+
+    def _open_game_logs(self):
+        """The folder holding Prospect.log. The game creates it on its first
+        run, and opening a missing folder would silently do nothing."""
+        folder = os.path.dirname(game_log_path(self.config))
+        if not os.path.isdir(folder):
+            QMessageBox.information(self, "Game logs",
+                                    "There are no game logs yet. They appear once the game has run.")
+            return
+        self._open_host_path(folder)
 
     def _open_host_path(self, path: str):
         """Open a file/folder on the host, working around the frozen build's

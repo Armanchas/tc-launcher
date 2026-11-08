@@ -28,4 +28,4 @@ include = ["tclauncher*"]
 version = {attr = "tclauncher.version.APP_VERSION"}
 
 [tool.setuptools.package-data]
-tclauncher = ["assets/*"]
+tclauncher = ["assets/*", "assets/icons/*"]

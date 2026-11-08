@@ -39,13 +39,17 @@ from ..config import ConfigManager
 from ..desktop import open_url
 from ..mods import Mod, ModManager, ModStatus
 from ..platforms import IS_WINDOWS
+from ..updater import DEFAULT_REPO
 from ..version import APP_VERSION
-from .theme import OK, TEXT_DIM, WARN
+from . import icons
+from .theme import ACCENT, OK, TEXT, TEXT_DIM, WARN
 from .widgets import Switch
 from .workers import run_worker
 
 LOCK_NOTE = "Close the game to change this"
 DISCORD_INVITE = "https://discord.gg/8hNgwXc9m2"
+GITHUB_URL = f"https://github.com/{DEFAULT_REPO}"
+WEBSITE_URL = "https://tc-stormrunners.xyz/"
 
 STATUS_STYLE = {
     ModStatus.UP_TO_DATE: OK,
@@ -568,13 +572,30 @@ class ServerSection(Section):
 
 class AboutSection(Section):
     logs_requested = Signal()
+    game_logs_requested = Signal()
     update_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        version = QLabel(f"The Cycle Launcher v{APP_VERSION}")
-        version.setObjectName("aboutVersion")
-        self._layout.addWidget(version)
+        self._layout.addStretch()
+
+        self.logo = QLabel()
+        self.logo.setPixmap(icons.pixmap(icons.LOGO, TEXT, 96))
+        self._layout.addWidget(self.logo, 0, Qt.AlignHCenter)
+        title = QLabel("The Cycle: Storm Runners")
+        title.setObjectName("aboutTitle")
+        self._layout.addWidget(title, 0, Qt.AlignHCenter)
+
+        platform = "Windows" if IS_WINDOWS else "Linux"
+        self.info = QLabel(" &nbsp;|&nbsp; ".join(
+            f"{label}: <span style='color: {ACCENT}; font-weight: 600;'>{value}</span>"
+            for label, value in (("Version", APP_VERSION), ("Platform", platform))))
+        self.info.setTextFormat(Qt.RichText)
+        self._layout.addWidget(self.info, 0, Qt.AlignHCenter)
+        blurb = QLabel("A community launcher for The Cycle, on Linux and Windows.")
+        blurb.setObjectName("dim")
+        self._layout.addWidget(blurb, 0, Qt.AlignHCenter)
+
         self.update_label = QLabel("")
         self.update_label.setObjectName("link")
         self.update_label.setTextFormat(Qt.RichText)
@@ -582,20 +603,48 @@ class AboutSection(Section):
         self.update_label.setCursor(Qt.PointingHandCursor)
         self.update_label.linkActivated.connect(lambda _href: self.update_requested.emit())
         self.update_label.hide()
-        self._layout.addWidget(self.update_label)
-        self.logs_button = QPushButton("Open logs folder")
+        self._layout.addWidget(self.update_label, 0, Qt.AlignHCenter)
+
+        self._layout.addSpacing(8)
+        self.github_button = self._link_button("GitHub", icons.GITHUB, GITHUB_URL)
+        self.discord_button = self._link_button("Join our Discord", icons.DISCORD, DISCORD_INVITE)
+        self.website_button = self._link_button("Website", icons.WEBSITE, WEBSITE_URL)
+        self._centered_row(self.github_button, self.discord_button, self.website_button)
+
+        self.logs_button = QPushButton("Launcher logs")
+        icons.apply(self.logs_button, icons.LOG_FILE, TEXT, 18)
         self.logs_button.clicked.connect(self.logs_requested.emit)
+        self.game_logs_button = QPushButton("Game logs")
+        icons.apply(self.game_logs_button, icons.FOLDER, TEXT, 18)
+        self.game_logs_button.clicked.connect(self.game_logs_requested.emit)
+        self._centered_row(self.logs_button, self.game_logs_button)
+
+        self._layout.addSpacing(8)
+        built_with = QLabel("Built with")
+        built_with.setObjectName("dim")
+        self.heart = QLabel()
+        self.heart.setPixmap(icons.pixmap(icons.HEART, ACCENT, 18))
+        self.credit_after = QLabel("by the TC: Storm Runners team")
+        self.credit_after.setObjectName("dim")
+        self._centered_row(built_with, self.heart, self.credit_after)
+        self.finish()
+
+    def _link_button(self, text: str, icon_name: str, url: str) -> QPushButton:
+        button = QPushButton(text)
+        icons.apply(button, icon_name, TEXT, 18)
+        button.setToolTip(url)
         # open_url, not QDesktopServices: it strips the bundle's library
         # environment before handing the URL to the host's browser.
-        self.discord_button = QPushButton("Join our Discord")
-        self.discord_button.setToolTip(DISCORD_INVITE)
-        self.discord_button.clicked.connect(lambda: open_url(DISCORD_INVITE))
+        button.clicked.connect(lambda: open_url(url))
+        return button
+
+    def _centered_row(self, *widgets: QWidget):
         row = QHBoxLayout()
-        row.addWidget(self.discord_button)
-        row.addWidget(self.logs_button)
+        row.addStretch()
+        for widget in widgets:
+            row.addWidget(widget)
         row.addStretch()
         self._layout.addLayout(row)
-        self.finish()
 
     def set_update_text(self, text: str | None):
         if text:

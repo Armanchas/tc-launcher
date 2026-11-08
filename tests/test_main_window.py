@@ -75,10 +75,11 @@ def test_mods_chip_opens_mods_section(window):
 
 def test_mods_chip_shows_attention(window):
     win = window()
-    assert win.chip_mods.text() == "Mods"
+    assert win.chip_mods.icon().isNull()
     win.overlay.mods_checked.emit(True)
-    assert "⚠" in win.chip_mods.text()
+    assert not win.chip_mods.icon().isNull()
     win.overlay.mods_checked.emit(False)
+    assert win.chip_mods.icon().isNull()
     assert win.chip_mods.text() == "Mods"
 
 
@@ -203,3 +204,97 @@ def test_play_button_is_a_pill(window):
     radius = int(re.search(r"QPushButton#primary \{[^}]*border-radius: (\d+)px", STYLESHEET).group(1))
     assert win.btn_play.minimumHeight() == win.btn_play.maximumHeight()
     assert radius * 2 == win.btn_play.height()
+
+
+def test_cog_and_close_are_icons_not_text(window):
+    win = window()
+    for button in (win.btn_settings, win.overlay.close_button):
+        assert button.text() == ""
+        assert not button.icon().isNull()
+
+
+def test_status_chips_carry_their_symbol_as_an_icon(window):
+    win = window()
+    win._set_status("23 players online", "online", population=True)
+    assert win.chip_online.text() == "23 players online"
+    assert not win.chip_online.icon().isNull()
+
+
+def test_placeholder_avatar_draws_the_person_icon(qapp):
+    from PySide6.QtGui import QColor
+
+    from tclauncher.ui.theme import TEXT
+
+    image = main_window.placeholder_avatar("", 40).toImage()
+    text = QColor(TEXT)
+    drawn = sum(image.pixelColor(x, y).lightness() >= text.lightness() - 20
+                for x in range(40) for y in range(40))
+    assert drawn > 10
+
+
+def _in_game(win, monkeypatch, clock):
+    win.config.backend_data = {"backend_api": "http://server"}
+    monkeypatch.setattr(main_window.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(win.runner, "is_running", lambda: True)
+    win._set_status("Game running…", "online")
+    win.worker_calls.clear()
+
+
+def _status_requests(win):
+    return [c for c in win.worker_calls if c[0] == win.backend.server_status]
+
+
+def test_player_count_keeps_updating_while_the_game_runs(window, monkeypatch):
+    win = window()
+    _in_game(win, monkeypatch, [1_000_000.0])
+    win._poll_status()
+    assert len(_status_requests(win)) == 1
+    _status_requests(win)[0][2]["on_finished"]({"online": 7})
+    assert win.chip_online.text() == "7 players online"
+    assert win.status_line.text() == "Game running…"
+    assert not win.status_line.isHidden()
+
+
+def test_in_game_the_count_refreshes_once_a_minute(window, monkeypatch):
+    win = window()
+    clock = [1_000_000.0]
+    _in_game(win, monkeypatch, clock)
+    win._poll_status()
+    clock[0] += 59
+    win._poll_status()
+    assert len(_status_requests(win)) == 1
+    clock[0] += 2
+    win._poll_status()
+    assert len(_status_requests(win)) == 2
+
+
+def test_launcher_logs_open_the_launcher_folder(window, monkeypatch):
+    win = window()
+    opened = []
+    monkeypatch.setattr(win, "_open_host_path", opened.append)
+    win.overlay.about.logs_button.click()
+    assert opened == [main_window.LAUNCHER_USERDIR]
+
+
+def test_game_logs_open_the_folder_holding_prospect_log(window, monkeypatch, tmp_path):
+    win = window()
+    log = tmp_path / "Logs" / "Prospect.log"
+    log.parent.mkdir()
+    monkeypatch.setattr(main_window, "game_log_path", lambda config: str(log))
+    opened = []
+    monkeypatch.setattr(win, "_open_host_path", opened.append)
+    win.overlay.about.game_logs_button.click()
+    assert opened == [str(log.parent)]
+
+
+def test_game_logs_before_the_first_run_explains_itself(window, monkeypatch, tmp_path):
+    win = window()
+    monkeypatch.setattr(main_window, "game_log_path",
+                        lambda config: str(tmp_path / "nope" / "Prospect.log"))
+    opened, told = [], []
+    monkeypatch.setattr(win, "_open_host_path", opened.append)
+    monkeypatch.setattr(main_window.QMessageBox, "information",
+                        lambda *a, **k: told.append(a))
+    win.overlay.about.game_logs_button.click()
+    assert opened == []
+    assert len(told) == 1

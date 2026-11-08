@@ -133,7 +133,8 @@ and Log out.
   **Show game status on Discord** (on by default)
 - **Mods:** each mod's status, with Install / Update / Reinstall
 - **Server:** the community server's discovery URL
-- **About:** launcher version, update, and **Open logs folder**
+- **About:** version and update, links to GitHub, Discord and the website, and
+  buttons for the **Launcher logs** and **Game logs** folders
 
 Linux only (the **Proton** section), hidden on Windows where the game runs natively:
 
@@ -175,7 +176,7 @@ identity. Turn it off in Settings. If Discord is not running, nothing happens.
 ## Files and logs
 
 Everything the launcher writes lives in `~/.tclauncher/`, which on Windows is
-`C:\Users\<you>\.tclauncher\`. Settings → About → Open logs folder opens it.
+`C:\Users\<you>\.tclauncher\`. Settings → About → Launcher logs opens it.
 
 | Path | Purpose |
 | --- | --- |

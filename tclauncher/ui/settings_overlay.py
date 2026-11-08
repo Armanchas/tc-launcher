@@ -1,7 +1,7 @@
 """Settings, drawn over the main window instead of in a separate window.
 
 A full-window dimming layer with a centred panel: sections listed on the left,
-one section shown on the right. Closes with ✕, Esc, or a click on the dim area
+one section shown on the right. Closes with the X button, Esc, or a click on the dim area
 outside the panel; closing is never refused, and a field still holding an
 invalid value is put back to its saved value (see settings_sections).
 """
@@ -23,7 +23,9 @@ from ..backend import BackendClient
 from ..config import ConfigManager
 from ..mods import ModManager
 from ..platforms import IS_WINDOWS
+from . import icons
 from .settings_sections import AboutSection, GameSection, ModsSection, ProtonSection, ServerSection
+from .theme import TEXT
 
 TITLES = {"game": "Game", "proton": "Proton", "mods": "Mods", "server": "Server", "about": "About"}
 
@@ -33,6 +35,7 @@ class SettingsOverlay(QWidget):
     server_changed = Signal()
     mods_checked = Signal(bool)
     open_logs_requested = Signal()
+    open_game_logs_requested = Signal()
     mods_busy = Signal(bool)
     update_requested = Signal()
 
@@ -82,7 +85,9 @@ class SettingsOverlay(QWidget):
         self.title.setObjectName("sectionTitle")
         header.addWidget(self.title)
         header.addStretch()
-        self.close_button = QPushButton("✕")
+        self.close_button = QPushButton()
+        icons.apply(self.close_button, icons.CLOSE, TEXT, 16)
+        self.close_button.setToolTip("Close")
         self.close_button.setObjectName("closeButton")
         self.close_button.setCursor(Qt.PointingHandCursor)
         self.close_button.clicked.connect(self.close)
@@ -108,6 +113,7 @@ class SettingsOverlay(QWidget):
         self._running = False
         self._installing = False
         self.about.logs_requested.connect(self.open_logs_requested.emit)
+        self.about.game_logs_requested.connect(self.open_game_logs_requested.emit)
         self.about.update_requested.connect(self.update_requested.emit)
 
         parent.installEventFilter(self)

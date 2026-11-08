@@ -202,7 +202,6 @@ QPushButton#cog {{
     border-radius: 26px;
     min-width: 52px; max-width: 52px; min-height: 52px; max-height: 52px;
     padding: 0;
-    font-size: 22px;
 }}
 QPushButton#cog:hover {{ background-color: rgba(0, 194, 226, 80); }}
 QLabel#statusLine {{
@@ -244,7 +243,7 @@ QLabel#lockNote {{
     color: {WARN}; background-color: rgba(241, 196, 15, 22);
     border: 1px solid rgba(241, 196, 15, 70); border-radius: 6px; padding: 6px 10px;
 }}
-QLabel#aboutVersion {{ font-size: 15px; font-weight: 600; }}
+QLabel#aboutTitle {{ font-size: 22px; font-weight: 800; }}
 QPushButton#closeButton {{
     background-color: {SURFACE_HI}; border: none; border-radius: 14px;
     min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; padding: 0;
