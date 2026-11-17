@@ -4,10 +4,14 @@ The Cycle ships Discord Rich Presence, but under Proton the Game SDK cannot
 reach the host's Unix socket, so it never connects. Instead the launcher reads
 the game's log and publishes presence itself.
 
-Only two log lines matter:
+The map and match state come from these lines:
 
     LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
     LogYGameState:    OnRep_MatchState | State: [MatchInProgress]
+    LogWorld:         SeamlessTravel to: /Game/Maps/MP/MAP02/MP_Map02_P
+
+The last is how the match map arrives from the pre-match lobby: a seamless
+travel logs no PreLoadingNewMap. It carries a map path only.
 
 The `LoadMap:` line is deliberately NOT parsed: it carries the live server IP
 and port. `PreLoadingNewMap` is address-free.
@@ -86,6 +90,11 @@ SQUAD_MAX = 4
 
 _IN_MATCH_LABEL = "In Match"
 
+# The community's pre-match lobby: queued players wait here for about a
+# minute, then travel to the match map (see _TRAVEL_RE). It keeps the
+# matchmaking context, since the match after it needs the mode and squad.
+LOBBY_MAP = "Station_Lobby"
+
 # The second presence line ("state") is drawn from a pool, re-rolled each time
 # the player enters that state, so a session does not read the same all evening.
 # The game's own Generic_DiscordRP_* string leads each pool, so the default --
@@ -125,6 +134,10 @@ FLAVOUR: dict[str, tuple[str, ...]] = {
 LARGE_IMAGE_KEY = "the_cycle"
 
 _MAP_RE = re.compile(r"PreLoadingNewMap \| new map '([^']+)'")
+# The lobby's travel to the match map. Only the last path segment is used, and
+# only when it is a plain id that the map allowlists then resolve.
+_TRAVEL_RE = re.compile(r"LogWorld: SeamlessTravel to: (\S+)")
+_MAP_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _STATE_RE = re.compile(r"OnRep_MatchState \| State: \[([^\]]+)\]")
 # Logged at ordinary Log level (not Verbose) when the player queues, so the
 # mode is known before the match map loads.
@@ -209,7 +222,20 @@ def _match_label(p: Presence) -> str:
     return name or _IN_MATCH_LABEL
 
 
+_LOBBY_LABEL = "In Pre-Match Lobby"  # the same for every mode: it shows once the match starts
+
+
+def _travel_map_id(path: str) -> str:
+    """"/Game/Maps/MP/MAP02/MP_Map02_P.MP_Map02_P?listen" -> "MP_Map02_P", or ""."""
+    map_id = path.rsplit("/", 1)[-1].split("?", 1)[0].split(".", 1)[0]
+    return map_id if _MAP_ID_RE.match(map_id) else ""
+
+
 def _for_map(map_id: str, current: Presence) -> Presence:
+    if map_id == LOBBY_MAP:
+        # No map name yet: the lobby only learns it at the travel.
+        nxt = Presence("in_lobby", _LOBBY_LABEL, "", "", **_context(current))
+        return with_flavour(nxt, "")
     if map_id in _MAP_STATES:
         # Hub maps end a match: drop the mode so the next match cannot inherit
         # a stale one. Squad membership is not part of a match -- it persists
@@ -241,6 +267,18 @@ def derive(current: Presence | None, line: str) -> Presence | None:
     match = _MAP_RE.search(line)
     if match:
         nxt = _for_map(match.group(1), current)
+        return None if nxt == current else nxt
+
+    match = _TRAVEL_RE.search(line)
+    if match:
+        map_id = _travel_map_id(match.group(1))
+        nxt = _for_map(map_id, current) if map_id else _GENERIC
+        if nxt.key == _GENERIC.key:
+            if not map_id:
+                logger.debug("Unrecognised seamless travel target in game log")
+            # The travel comes from the lobby, which holds the queued mode and
+            # squad: keep them, so a map not yet in MAPS still shows the mode.
+            nxt = replace(_GENERIC, **_context(current))
         return None if nxt == current else nxt
 
     match = _MM_RE.search(line)

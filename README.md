@@ -171,10 +171,11 @@ so it shows a plain icon and "Signed in".
 
 ## Discord Rich Presence
 
-While you play, the launcher shows your status on Discord: In Station, In Match
-with the map, Deathmatch, your squad size, and a match timer. It reads this from
-the game's own log and never publishes a server address or anyone else's
-identity. Turn it off in Settings. If Discord is not running, nothing happens.
+While you play, the launcher shows your status on Discord: In Station, the
+pre-match lobby, In Match with the map, Deathmatch, your squad size, and a
+match timer. It reads this from the game's own log and never publishes a
+server address or anyone else's identity. Turn it off in Settings. If Discord
+is not running, nothing happens.
 
 ## Files and logs
 

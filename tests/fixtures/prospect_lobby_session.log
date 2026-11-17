@@ -1,0 +1,88 @@
+[2026.11.14-19.44.00:059][  0]LogYGameInstance: PreLoadingNewMap | new map 'Login_P'.
+[2026.11.14-19.44.03:391][931]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
+[2026.11.14-19.48.35:139][439]LogYMatchmakingController: EnterMatchmaking | Map: '', GameMode: 'LOOP', IsRanked: 0
+[2026.11.14-19.49.13:236][ 83]LogYGameInstance: PreLoadingNewMap | new map 'Station_Lobby'.
+[2026.11.14-19.49.14:903][212]LogYGameState: OnRep_MatchState | State: [LaunchingMatch]
+[2026.11.14-19.50.13:764][ 86]LogWorld: SeamlessTravel to: /Game/Maps/MP/MAP02/MP_Map02_P
+[2026.11.14-19.50.13:778][ 86]LogYGameState: OnRep_MatchState | State: [SeamlessTravel]
+[2026.11.14-19.50.18:055][ 86]LogYGameState: OnRep_MatchState | State: [MatchIntro]
+[2026.11.14-19.50.34:080][899]LogYGameState: OnRep_MatchState | State: [MatchInProgress]
+[2026.11.14-20.10.34:459][661]LogYGameState: OnRep_MatchState | State: [MatchEnding]
+[2026.11.14-20.10.59:068][759]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
+[2026.11.14-20.11.34:648][729]LogYGameInstance: PreLoadingNewMap | new map 'Tut_Sandbox_P'.
+[2026.11.14-20.11.45:276][795]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
+[2026.11.14-20.18.30:022][293]LogYMatchmakingController: EnterMatchmaking | Map: '', GameMode: 'SQUADLOOP', IsRanked: 0
+[2026.11.14-20.19.04:896][117]LogYGameInstance: PreLoadingNewMap | new map 'Station_Lobby'.
+[2026.11.14-20.19.06:393][321]LogYGameState: OnRep_MatchState | State: [LaunchingMatch]
+[2026.11.14-20.20.04:484][638]LogWorld: SeamlessTravel to: /Game/Maps/MP/MAP01/MP_Map01_P
+[2026.11.14-20.20.04:493][638]LogYGameState: OnRep_MatchState | State: [SeamlessTravel]
+[2026.11.14-20.20.07:938][638]LogYGameState: OnRep_MatchState | State: [MatchIntro]
+[2026.11.14-20.20.23:448][859]LogYGameState: OnRep_MatchState | State: [MatchInProgress]
+[2026.11.14-20.40.23:774][391]LogYGameState: OnRep_MatchState | State: [MatchEnding]
+[2026.11.14-20.41.13:433][ 85]LogYGameState: OnRep_MatchState | State: [MatchOver]
+[2026.11.14-20.41.18:438][968]LogYGameState: OnRep_MatchState | State: [DisconnectedPlayers]
+[2026.11.14-20.41.29:657][ 64]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
+[2026.11.14-20.46.40:344][943]LogYMatchmakingController: EnterMatchmaking | Map: '', GameMode: 'LOOP', IsRanked: 0
+[2026.11.14-20.47.10:125][983]LogYGameInstance: PreLoadingNewMap | new map 'Station_Lobby'.
+[2026.11.14-20.47.11:843][104]LogYGameState: OnRep_MatchState | State: [LaunchingMatch]
+[2026.11.14-20.48.02:284][675]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
+[2026.11.14-20.50.21:830][ 33]LogYMatchmakingController: EnterMatchmaking | Map: '', GameMode: 'LOOP', IsRanked: 0
+[2026.11.14-20.55.35:782][976]LogYMatchmakingController: EnterMatchmaking | Map: '', GameMode: 'LOOP', IsRanked: 0
+[2026.11.14-20.56.15:742][940]LogYGameInstance: PreLoadingNewMap | new map 'Station_Lobby'.
+[2026.11.14-20.56.17:249][ 92]LogYGameState: OnRep_MatchState | State: [LaunchingMatch]
+[2026.11.14-20.57.15:261][ 79]LogWorld: SeamlessTravel to: /Game/Maps/MP/MAP01/MP_Map01_P
+[2026.11.14-20.57.15:270][ 79]LogYGameState: OnRep_MatchState | State: [SeamlessTravel]
+[2026.11.14-20.57.18:738][ 79]LogYGameState: OnRep_MatchState | State: [MatchIntro]
+[2026.11.14-20.57.34:253][561]LogYGameState: OnRep_MatchState | State: [MatchInProgress]
+[2026.11.14-21.17.34:521][906]LogYGameState: OnRep_MatchState | State: [MatchEnding]
+[2026.11.14-21.18.14:247][694]LogYGameState: OnRep_MatchState | State: [MatchOver]
+[2026.11.14-21.18.19:222][510]LogYGameState: OnRep_MatchState | State: [DisconnectedPlayers]
+[2026.11.14-21.18.52:744][954]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
+[2026.11.14-21.22.06:147][487]LogYMatchmakingController: EnterMatchmaking | Map: '', GameMode: 'EVENTGOINGDARK', IsRanked: 0
+[2026.11.14-21.22.34:614][687]LogYGameInstance: PreLoadingNewMap | new map 'Station_Lobby'.
+[2026.11.14-21.22.36:349][919]LogYGameState: OnRep_MatchState | State: [LaunchingMatch]
+[2026.11.14-21.23.34:099][766]LogWorld: SeamlessTravel to: /Game/Maps/MP/MAP02/MP_Map02_P
+[2026.11.14-21.23.34:110][766]LogYGameState: OnRep_MatchState | State: [SeamlessTravel]
+[2026.11.14-21.23.38:631][766]LogYGameState: OnRep_MatchState | State: [MatchIntro]
+[2026.11.14-21.23.54:624][570]LogYGameState: OnRep_MatchState | State: [MatchInProgress]
+[2026.11.14-21.43.55:044][ 51]LogYGameState: OnRep_MatchState | State: [MatchEnding]
+[2026.11.14-21.44.34:604][660]LogYGameState: OnRep_MatchState | State: [MatchOver]
+[2026.11.14-21.44.39:588][415]LogYGameState: OnRep_MatchState | State: [DisconnectedPlayers]
+[2026.11.14-21.44.49:590][ 85]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
+[2026.11.14-21.49.41:805][561]LogYMatchmakingController: EnterMatchmaking | Map: '', GameMode: 'DUO', IsRanked: 0
+[2026.11.14-21.50.13:611][ 37]LogYGameInstance: PreLoadingNewMap | new map 'Station_Lobby'.
+[2026.11.14-21.50.15:134][160]LogYGameState: OnRep_MatchState | State: [LaunchingMatch]
+[2026.11.14-21.51.13:444][886]LogWorld: SeamlessTravel to: /Game/Maps/MP/MAP01/MP_Map01_P
+[2026.11.14-21.51.13:458][886]LogYGameState: OnRep_MatchState | State: [SeamlessTravel]
+[2026.11.14-21.51.16:655][886]LogYGameState: OnRep_MatchState | State: [MatchIntro]
+[2026.11.14-21.51.32:143][336]LogYGameState: OnRep_MatchState | State: [MatchInProgress]
+[2026.11.14-22.11.32:821][867]LogYGameState: OnRep_MatchState | State: [MatchEnding]
+[2026.11.14-22.12.22:141][937]LogYGameState: OnRep_MatchState | State: [MatchOver]
+[2026.11.14-22.12.27:118][796]LogYGameState: OnRep_MatchState | State: [DisconnectedPlayers]
+[2026.11.14-22.12.41:099][190]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
+[2026.11.14-22.16.03:219][851]LogYMatchmakingController: EnterMatchmaking | Map: '', GameMode: 'LIST', IsRanked: 0
+[2026.11.14-22.17.23:369][537]LogYGameInstance: PreLoadingNewMap | new map 'TestMap_DeathMatch_P'.
+[2026.11.14-22.17.25:804][610]LogYGameState: OnRep_MatchState | State: [MatchIntro]
+[2026.11.14-22.17.39:364][ 16]LogYGameState: OnRep_MatchState | State: [MatchInProgress]
+[2026.11.14-22.37.39:575][ 31]LogYGameState: OnRep_MatchState | State: [MatchEnding]
+[2026.11.14-22.38.17:938][ 60]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
+[2026.11.14-22.48.14:012][122]LogYMatchmakingController: EnterMatchmaking | Map: '', GameMode: 'LOOP', IsRanked: 0
+[2026.11.14-22.48.51:993][834]LogYGameInstance: PreLoadingNewMap | new map 'Station_Lobby'.
+[2026.11.14-22.48.53:440][920]LogYGameState: OnRep_MatchState | State: [LaunchingMatch]
+[2026.11.14-22.49.52:715][303]LogWorld: SeamlessTravel to: /Game/Maps/MP/MAP01/MP_Map01_P
+[2026.11.14-22.49.52:724][303]LogYGameState: OnRep_MatchState | State: [SeamlessTravel]
+[2026.11.14-22.49.56:024][303]LogYGameState: OnRep_MatchState | State: [MatchIntro]
+[2026.11.14-22.50.11:589][458]LogYGameState: OnRep_MatchState | State: [MatchInProgress]
+[2026.11.14-23.10.11:908][635]LogYGameState: OnRep_MatchState | State: [MatchEnding]
+[2026.11.14-23.11.01:595][186]LogYGameState: OnRep_MatchState | State: [MatchOver]
+[2026.11.14-23.11.04:486][889]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
+[2026.11.15-01.11.27:082][915]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
+[2026.11.15-01.11.33:289][391]LogYMatchmakingController: EnterMatchmaking | Map: '', GameMode: 'LOOP', IsRanked: 0
+[2026.11.15-01.12.04:883][150]LogYGameInstance: PreLoadingNewMap | new map 'Station_Lobby'.
+[2026.11.15-01.12.06:128][237]LogYGameState: OnRep_MatchState | State: [PreMatch]
+[2026.11.15-01.12.15:178][839]LogYGameState: OnRep_MatchState | State: [LaunchingMatch]
+[2026.11.15-01.13.15:188][394]LogWorld: SeamlessTravel to: /Game/Maps/MP/MAP02/MP_Map02_P
+[2026.11.15-01.13.15:197][394]LogYGameState: OnRep_MatchState | State: [SeamlessTravel]
+[2026.11.15-01.13.19:462][394]LogYGameState: OnRep_MatchState | State: [MatchIntro]
+[2026.11.15-01.13.35:547][775]LogYGameState: OnRep_MatchState | State: [MatchInProgress]
+[2026.11.15-01.16.11:113][ 62]LogYGameInstance: PreLoadingNewMap | new map 'Station_P'.
