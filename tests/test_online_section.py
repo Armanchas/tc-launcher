@@ -276,3 +276,15 @@ def test_partial_first_load_does_not_claim_a_last_list(make):
     assert section.shown_players() == ["Alice"]
     assert any("Couldn't load" in t for t in section.shown_matches())
     assert section.message.text() == ""
+
+
+def test_recent_open_match_reads_ongoing(make):
+    section = make(FakeBackend([], [_match(created_at=NOW - 300),
+                                    _match(id="done", created_at=NOW - 300, status=1),
+                                    _match(id="old", created_at=NOW - 1500)]))
+    section.refresh()
+    cards = section.shown_matches()
+    assert len(cards) == 3
+    assert "Ongoing" in cards[0]
+    assert "Ongoing" not in cards[1]
+    assert "Ongoing" not in cards[2]

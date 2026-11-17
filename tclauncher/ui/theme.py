@@ -70,6 +70,7 @@ QLabel#subtitle {{
     text-transform: uppercase;
 }}
 QLabel#dim {{ color: {TEXT_DIM}; }}
+QLabel#ongoing {{ color: {OK}; font-weight: 600; margin-right: 6px; }}
 QLabel#sectionLabel {{ color: {TEXT_DIM}; font-size: 11px; letter-spacing: 1px; }}
 
 /* Default (secondary) buttons */

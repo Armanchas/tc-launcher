@@ -1,7 +1,8 @@
 """Formatting for the Online section: match titles, times and player lines."""
 
-from tclauncher.community import (count_label, player_line, relative_time,
-                                  summarize, summarize_all)
+from tclauncher.community import (ONGOING_SECONDS, count_label, is_ongoing,
+                                  player_line, relative_time, summarize,
+                                  summarize_all)
 
 MAP2 = "/Game/Maps/MP/MAP02/MP_Map02_P.MP_Map02_P"
 DM = "/Game/Maps/Testmaps/TestMap_DeathMatch_P.TestMap_DeathMatch_P"
@@ -78,3 +79,27 @@ def test_count_label():
 def test_row_keeps_match_id():
     assert summarize(_m(id="abc")).id == "abc"
     assert summarize(_m(id=None)).id == ""
+
+
+def test_ongoing_is_open_and_under_twenty_minutes():
+    assert ONGOING_SECONDS == 20 * 60
+    row = summarize(_m(created_at=1000))
+    assert is_ongoing(row, 1000)
+    assert is_ongoing(row, 1000 + ONGOING_SECONDS - 1)
+    assert not is_ongoing(row, 1000 + ONGOING_SECONDS)
+
+
+def test_finished_match_is_never_ongoing():
+    # The server sets status 1 when it applies the result: an early finish.
+    assert not is_ongoing(summarize(_m(created_at=1000, status=1)), 1000 + 60)
+
+
+def test_missing_status_falls_back_to_the_timestamp():
+    match = _m(created_at=1000)
+    del match["status"]
+    assert is_ongoing(summarize(match), 1000 + 60)
+    assert is_ongoing(summarize(_m(created_at=1000, status="x")), 1000 + 60)
+
+
+def test_server_clock_ahead_still_reads_ongoing():
+    assert is_ongoing(summarize(_m(created_at=1000)), 1000 - 30)

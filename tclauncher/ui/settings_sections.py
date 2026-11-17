@@ -36,7 +36,8 @@ from PySide6.QtWidgets import (
 )
 
 from ..backend import BackendClient, ServerDiscoveryStatus
-from ..community import NAMES_SHOWN, MatchRow, count_label, player_line, relative_time, summarize_all
+from ..community import (NAMES_SHOWN, MatchRow, count_label, is_ongoing, player_line,
+                         relative_time, summarize_all)
 from ..config import ConfigManager
 from ..desktop import open_url
 from ..mods import Mod, ModManager, ModStatus
@@ -692,6 +693,10 @@ class MatchCard(QFrame):
         top = QHBoxLayout()
         top.addWidget(_plain(row.title))
         top.addStretch()
+        if is_ongoing(row, now):
+            ongoing = QLabel("Ongoing")
+            ongoing.setObjectName("ongoing")
+            top.addWidget(ongoing)
         top.addWidget(_dim(f"{relative_time(row.created_at, now)} · {count_label(len(row.players))}"))
         layout.addLayout(top)
 

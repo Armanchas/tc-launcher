@@ -133,7 +133,8 @@ and Log out.
   **Show game status on Discord** (on by default)
 - **Mods:** each mod's status, with Install / Update / Reinstall
 - **Online:** who is online right now and the 10 latest matches, with how long
-  ago each started. Clicking the players-online chip at the top right opens it.
+  ago each started. A match under 20 minutes old that has not finished reads
+  "Ongoing". Clicking the players-online chip at the top right opens it.
   It refreshes every minute while open, or with the refresh button.
 - **Server:** the community server's discovery URL
 - **About:** version and update, links to GitHub, Discord and the website, and

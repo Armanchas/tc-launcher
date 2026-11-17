@@ -30,6 +30,7 @@ class MatchRow:
     created_at: int
     players: list[str] = field(default_factory=list)
     id: str = ""  # keeps a card's expanded state across the minute's re-render
+    finished: bool = False  # status 1: the server applied the match's result
 
 
 def _map_id(path: str) -> str:
@@ -66,7 +67,8 @@ def summarize(match) -> MatchRow | None:
         match_id = match.get("id")
         return MatchRow(_title(match.get("game_mode"), match.get("map")),
                         created_at, _names(match.get("players")),
-                        match_id if isinstance(match_id, str) else "")
+                        match_id if isinstance(match_id, str) else "",
+                        match.get("status") == 1)
     except Exception:
         return None
 
@@ -87,6 +89,17 @@ def relative_time(created_at: int, now: float) -> str:
     if age < 86400:
         return f"{age // 3600} h ago"
     return f"{age // 86400} d ago"
+
+
+# A normal match lasts about 20 minutes.
+ONGOING_SECONDS = 20 * 60
+
+
+def is_ongoing(row: MatchRow, now: float) -> bool:
+    """A guess, by design: status 0 only means "no result yet", and a crashed
+    match keeps it forever, so an open match counts as ongoing only while it
+    is younger than a normal match. A finished one never does."""
+    return not row.finished and now - row.created_at < ONGOING_SECONDS
 
 
 NAMES_SHOWN = 4
