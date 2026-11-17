@@ -24,10 +24,18 @@ from ..config import ConfigManager
 from ..mods import ModManager
 from ..platforms import IS_WINDOWS
 from . import icons
-from .settings_sections import AboutSection, GameSection, ModsSection, ProtonSection, ServerSection
+from .settings_sections import (
+    AboutSection,
+    GameSection,
+    ModsSection,
+    OnlineSection,
+    ProtonSection,
+    ServerSection,
+)
 from .theme import TEXT
 
-TITLES = {"game": "Game", "proton": "Proton", "mods": "Mods", "server": "Server", "about": "About"}
+TITLES = {"game": "Game", "proton": "Proton", "mods": "Mods", "online": "Online",
+          "server": "Server", "about": "About"}
 
 
 class SettingsOverlay(QWidget):
@@ -49,12 +57,14 @@ class SettingsOverlay(QWidget):
         self.game = GameSection(config)
         self.proton = None if IS_WINDOWS else ProtonSection(config)
         self.mods = ModsSection(mod_manager, config)
+        self.online = OnlineSection(config, backend)
         self.server = ServerSection(config, backend)
         self.about = AboutSection()
         self._sections: dict[str, QWidget] = {"game": self.game}
         if self.proton is not None:
             self._sections["proton"] = self.proton
-        self._sections.update(mods=self.mods, server=self.server, about=self.about)
+        self._sections.update(mods=self.mods, online=self.online, server=self.server,
+                              about=self.about)
 
         self.panel = QFrame(self)
         self.panel.setObjectName("overlayPanel")
@@ -107,7 +117,7 @@ class SettingsOverlay(QWidget):
         panel_layout.addWidget(main, 1)
 
         self.section_list.currentRowChanged.connect(self._show_row)
-        self.server.changed.connect(self.server_changed.emit)
+        self.server.changed.connect(self._on_server_changed)
         self.mods.checked.connect(self.mods_checked.emit)
         self.mods.busy.connect(self._on_mods_busy)
         self._running = False
@@ -154,6 +164,10 @@ class SettingsOverlay(QWidget):
         for section in self._sections.values():
             section.set_locked(running)
         self._lock_server()
+
+    def _on_server_changed(self):
+        self.online.reset()  # its lists were the previous server's
+        self.server_changed.emit()
 
     def _on_mods_busy(self, busy: bool):
         self._installing = busy

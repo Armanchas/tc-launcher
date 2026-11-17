@@ -249,6 +249,13 @@ QPushButton#closeButton {{
     min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; padding: 0;
 }}
 QPushButton#closeButton:hover {{ background-color: {BORDER}; }}
+/* The match card's chevron: no taller than the names line beside it, and
+   radius exactly half the height (Qt drops a larger one). */
+QPushButton#expandButton {{
+    background-color: transparent; border: none; border-radius: 8px;
+    min-width: 16px; max-width: 16px; min-height: 16px; max-height: 16px; padding: 0;
+}}
+QPushButton#expandButton:hover {{ background-color: {BORDER}; }}
 
 /* Mod manager rows */
 QLabel#dialogTitle {{ font-size: 16px; font-weight: 700; }}

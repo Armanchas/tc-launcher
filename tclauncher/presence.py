@@ -71,7 +71,7 @@ _MODE_NAMES = {
     "SQUADLOOPTOURNAMENT": "Tournament",
     "DUO": "Duo",
     "EVENT": "Event",
-    "EVENTGOINGDARK": "Going Dark",
+    "EVENTGOINGDARK": "Warden's Relics",  # community mode on the Going Dark queue
     "EVENTLOWGRAVITY": "Low Gravity",
 }
 

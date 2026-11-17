@@ -202,7 +202,7 @@ class MainWindow(QMainWindow):
         self.chip_update.hide()
         top.addWidget(self.chip_update, 0, Qt.AlignTop)
         self.chip_online = self._chip("Select a server to begin",
-                                      lambda: self.overlay.open_section("server"))
+                                      self._on_online_chip)
         icons.apply(self.chip_online, icons.DOT, TEXT_DIM, CHIP_DOT_SIZE, filled=True)
         top.addWidget(self.chip_online, 0, Qt.AlignTop)
         self.chip_mods = self._chip("Mods", lambda: self.overlay.open_section("mods"))
@@ -311,6 +311,12 @@ class MainWindow(QMainWindow):
         self.overlay.open_logs_requested.connect(lambda: self._open_host_path(LAUNCHER_USERDIR))
         self.overlay.open_game_logs_requested.connect(self._open_game_logs)
         self.overlay.update_requested.connect(self._on_update_chip)
+
+    def _on_online_chip(self):
+        # Until a server is set up the chip reads "Select a server to begin",
+        # and Online has nothing to show: that click belongs in Server.
+        ready = self.config.server_discovery_addr and self.config.backend_data is not None
+        self.overlay.open_section("online" if ready else "server")
 
     def _chip(self, text: str, slot) -> QPushButton:
         chip = QPushButton(text)

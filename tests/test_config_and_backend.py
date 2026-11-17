@@ -221,3 +221,62 @@ def test_identity_keys_roundtrip(tmp_path):
     again = ConfigManager(config_file=path)
     again.load()
     assert (again.steam_id, again.steam_name) == ("76561198000000000", "Armin")
+
+
+# --- the Online section's public reads ---
+
+def _online_client(tmp_path, monkeypatch, response):
+    config = ConfigManager(config_file=str(tmp_path / "c.json"))
+    config.backend_data = {"backend_api": "http://s"}
+    client = BackendClient(config)
+    calls = []
+
+    def get(url, params=None, timeout=None):
+        calls.append((url, params))
+        return response
+
+    monkeypatch.setattr(client.session, "get", get)
+    return client, calls
+
+
+def test_players_online_returns_names(tmp_path, monkeypatch):
+    client, calls = _online_client(tmp_path, monkeypatch,
+                                   _FakeResponse(200, {"success": True, "players": ["A", "B"]}))
+    assert client.players_online() == ["A", "B"]
+    assert calls[0][0] == "http://s/players/online"
+
+
+def test_players_online_rejects_non_list(tmp_path, monkeypatch):
+    client, _ = _online_client(tmp_path, monkeypatch, _FakeResponse(200, {"players": "A"}))
+    assert client.players_online() is None
+    client, _ = _online_client(tmp_path, monkeypatch, _FakeResponse(200, {"players": ["A", 3]}))
+    assert client.players_online() == ["A"]
+
+
+def test_players_online_without_server_is_none(tmp_path, monkeypatch):
+    client, calls = _online_client(tmp_path, monkeypatch, _FakeResponse(200, {"players": []}))
+    client.config.backend_data = None
+    assert client.players_online() is None
+    assert client.recent_matches() is None
+    assert calls == []
+
+
+def test_recent_matches_query_and_shape(tmp_path, monkeypatch):
+    matches = [{"id": "m", "created_at": 1}]
+    client, calls = _online_client(tmp_path, monkeypatch,
+                                   _FakeResponse(200, {"success": True, "matches": matches}))
+    assert client.recent_matches(10) == matches
+    url, params = calls[0]
+    assert url == "http://s/matches/history"
+    assert params == {"page_size": 10, "include_players": "true"}
+
+
+def test_recent_matches_rejects_non_list(tmp_path, monkeypatch):
+    client, _ = _online_client(tmp_path, monkeypatch, _FakeResponse(200, {"matches": {}}))
+    assert client.recent_matches() is None
+
+
+def test_recent_matches_429_is_none(tmp_path, monkeypatch):
+    client, _ = _online_client(tmp_path, monkeypatch, _FakeResponse(429))
+    assert client.recent_matches() is None
+    assert client.players_online() is None

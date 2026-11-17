@@ -132,6 +132,9 @@ and Log out.
 - **Game:** game folder, launch flags (e.g. `-log`), environment variables, and
   **Show game status on Discord** (on by default)
 - **Mods:** each mod's status, with Install / Update / Reinstall
+- **Online:** who is online right now and the 10 latest matches, with how long
+  ago each started. Clicking the players-online chip at the top right opens it.
+  It refreshes every minute while open, or with the refresh button.
 - **Server:** the community server's discovery URL
 - **About:** version and update, links to GitHub, Discord and the website, and
   buttons for the **Launcher logs** and **Game logs** folders

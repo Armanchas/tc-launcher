@@ -59,6 +59,35 @@ class BackendClient:
         except Exception:
             return None
 
+    # --- community (public, unauthenticated reads for the Online section) ---
+
+    def _public_list(self, path: str, key: str, params: dict | None = None) -> list | None:
+        """`payload[key]` from a public backend GET, or None if it is unavailable.
+
+        Failures log at debug level: /matches/history is rate-limited, so a
+        429 is routine rather than an error worth a traceback.
+        """
+        if self.config.backend_data is None:
+            return None
+        try:
+            res = self.session.get(f"{self.config.backend_data['backend_api']}{path}",
+                                   params=params, timeout=REQUEST_TIMEOUT)
+            res.raise_for_status()
+            items = res.json()[key]
+        except Exception as e:
+            logger.debug("GET %s failed: %s", path, e)
+            return None
+        return items if isinstance(items, list) else None
+
+    def players_online(self) -> list[str] | None:
+        names = self._public_list("/players/online", "players")
+        return None if names is None else [n for n in names if isinstance(n, str)]
+
+    def recent_matches(self, count: int = 10) -> list | None:
+        """The newest `count` matches, raw, with their players' rows."""
+        return self._public_list("/matches/history", "matches",
+                                 {"page_size": count, "include_players": "true"})
+
     # --- session (idp) ---
 
     def exchange_code(self, code: str) -> dict:

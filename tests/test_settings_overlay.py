@@ -26,6 +26,12 @@ class FakeBackend:
         self.discovered.append(url)
         return self.status
 
+    def players_online(self):
+        return []
+
+    def recent_matches(self, count=10):
+        return []
+
 
 def _mod(status):
     remote = {"id": "m1", "author": "a", "name": "Mod One", "version": "2",
@@ -499,3 +505,43 @@ def test_about_shows_the_team_logo_and_only_version_and_platform(make):
     assert "Protocol" not in overlay.about.info.text()
     assert "Version" in overlay.about.info.text()
     assert "Platform" in overlay.about.info.text()
+
+
+def test_online_section_sits_before_server(make):
+    keys = make().section_keys()
+    assert keys.index("online") == keys.index("server") - 1
+
+
+def test_online_section_stays_usable_while_playing(make):
+    overlay = make()
+    overlay.set_game_running(True)
+    assert overlay.online.refresh_button.isEnabled()
+
+
+def test_online_section_is_titled(make):
+    overlay = make()
+    overlay.open_section("online")
+    assert overlay.current_section() == "online"
+    assert overlay.title.text() == "Online"
+
+
+def test_online_timer_follows_the_overlay(make):
+    overlay = make()
+    overlay.open_section("online")
+    assert overlay.online.timer.isActive()
+    overlay.open_section("game")
+    assert not overlay.online.timer.isActive()
+    overlay.open_section("online")
+    assert overlay.online.timer.isActive()
+    overlay.close()
+    assert not overlay.online.timer.isActive()
+
+
+def test_server_change_resets_the_online_lists(make):
+    overlay = make()
+    calls = []
+    overlay.online.reset = lambda: calls.append(1)
+    overlay.open_section("server")
+    overlay.server.url_edit.setText("http://new/")
+    overlay.server.save_button.click()
+    assert calls == [1]

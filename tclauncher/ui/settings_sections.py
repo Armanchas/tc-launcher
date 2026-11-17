@@ -15,8 +15,9 @@ ServerDialog). Rules every section follows:
 """
 
 import shlex
+import time
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -35,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..backend import BackendClient, ServerDiscoveryStatus
+from ..community import NAMES_SHOWN, MatchRow, count_label, player_line, relative_time, summarize_all
 from ..config import ConfigManager
 from ..desktop import open_url
 from ..mods import Mod, ModManager, ModStatus
@@ -505,6 +507,263 @@ class ModsSection(Section):
         self.refresh()
         self.message.setText(f"{mod.remote['name']} installed." if ok
                              else f"Failed to install {mod.remote['name']}.")
+
+
+class OnlineSection(Section):
+    """Who is online and the latest matches, from the server's public reads.
+
+    Read-only, so it never locks. Fetches when shown, every REFRESH_MS while
+    visible, and on the refresh button -- never from the main window's 5 s
+    status poll, because /matches/history is rate-limited. A failed refresh
+    keeps the last lists on screen rather than wiping them.
+    """
+
+    REFRESH_MS = 60_000
+    MATCH_COUNT = 10
+
+    def __init__(self, config: ConfigManager, backend: BackendClient,
+                 parent: QWidget | None = None):
+        super().__init__(parent)
+        self.config = config
+        self.backend = backend
+        self._clock = time.time
+        self._loading = False
+        self._players: list[str] | None = None
+        self._matches: list[MatchRow] | None = None
+        self._expanded: set[str] = set()  # match ids whose full player list is open
+        self._answered = False  # any answer since the last reset, good or bad
+        # Bumped by reset(): an answer that set out before it belongs to the
+        # previous server and is dropped on arrival.
+        self._generation = 0
+
+        top = QHBoxLayout()
+        self.message = QLabel("")
+        self.message.setObjectName("dim")
+        self.message.setWordWrap(True)
+        top.addWidget(self.message, 1)
+        self.refresh_button = QPushButton()
+        icons.apply(self.refresh_button, icons.REFRESH, TEXT, 16)
+        self.refresh_button.setToolTip("Refresh")
+        self.refresh_button.setObjectName("closeButton")
+        self.refresh_button.setCursor(Qt.PointingHandCursor)
+        self.refresh_button.clicked.connect(self.refresh)
+        top.addWidget(self.refresh_button, 0, Qt.AlignTop)
+        self._layout.addLayout(top)
+
+        self.players_heading = QLabel("PLAYERS ONLINE")
+        self.players_heading.setObjectName("fieldLabel")
+        self._layout.addWidget(self.players_heading)
+        self.players_layout = QVBoxLayout()
+        self.players_layout.setSpacing(4)
+        self._layout.addLayout(self.players_layout)
+
+        matches_heading = QLabel("LATEST MATCHES")
+        matches_heading.setObjectName("fieldLabel")
+        self._layout.addWidget(matches_heading)
+        self.matches_layout = QVBoxLayout()
+        self.matches_layout.setSpacing(6)
+        self._layout.addLayout(self.matches_layout)
+        self.finish()
+
+        self.timer = QTimer(self)
+        self.timer.setInterval(self.REFRESH_MS)
+        self.timer.timeout.connect(self._tick)
+
+    # --- Section ---
+
+    # No set_locked override: the section has no lockables, so the base class
+    # leaves it all usable while the game runs. It is read-only.
+
+    # --- public ---
+
+    def reset(self):
+        """Forget the lists: the server changed, and they were the old one's."""
+        self._generation += 1
+        self._loading = False
+        self._answered = False
+        self._players = None
+        self._matches = None
+        self._expanded.clear()
+        self.message.setText("")
+        self._render()
+
+    def refresh(self):
+        if self._loading:
+            return
+        if self.config.backend_data is None:
+            if self._answered or self._players is not None or self._matches is not None:
+                self.reset()
+            self.message.setText("Select a server to see who's online.")
+            return
+        self._loading = True
+        self._render()  # "Loading…" until the first answer
+        backend, generation = self.backend, self._generation
+        run_worker(lambda: (generation, backend.players_online(),
+                            backend.recent_matches(self.MATCH_COUNT)),
+                   on_finished=self._loaded, on_failed=self._load_failed)
+
+    def shown_players(self) -> list[str]:
+        return _label_texts(self.players_layout)
+
+    def shown_matches(self) -> list[str]:
+        return _label_texts(self.matches_layout)
+
+    # --- internals ---
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.timer.start()
+        self.refresh()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.timer.stop()
+
+    def _tick(self):
+        self._render()  # "12 min ago" moves on even if the fetch fails
+        self.refresh()
+
+    def _load_failed(self, _error: str):
+        # The backend calls never raise, so this is a bug path; it carries no
+        # generation and is taken to be the current fetch's.
+        self._loaded((self._generation, None, None))
+
+    def _loaded(self, result):
+        generation, players, matches = result
+        if generation != self._generation:
+            return  # the previous server's answer
+        self._loading = False
+        self._answered = True
+        # A failure is only "stale" for a list that had something to keep.
+        stale = (players is None and self._players is not None) or \
+                (matches is None and self._matches is not None)
+        if players is not None:
+            self._players = sorted(players, key=str.casefold)
+        if matches is not None:
+            self._matches = summarize_all(matches)
+        self.message.setText("Couldn't refresh. Showing the last list." if stale else "")
+        self._render()
+
+    def _render(self):
+        _clear_layout(self.players_layout)
+        _clear_layout(self.matches_layout)
+        # A list with nothing yet: loading, failed, or (no server, or just
+        # reset) not asked for -- the last shows nothing at all.
+        unavailable = ("Loading…" if self._loading
+                       else "Couldn't load. Try refresh." if self._answered else "")
+        if self._players is None:
+            self.players_heading.setText("PLAYERS ONLINE")
+            if unavailable:
+                self.players_layout.addWidget(_dim(unavailable))
+        else:
+            self.players_heading.setText(f"PLAYERS ONLINE · {len(self._players)}")
+            if not self._players:
+                self.players_layout.addWidget(_dim("Nobody's online right now."))
+            for name in self._players:
+                self.players_layout.addWidget(_plain(name))
+        if self._matches is None:
+            if unavailable:
+                self.matches_layout.addWidget(_dim(unavailable))
+        elif not self._matches:
+            self.matches_layout.addWidget(_dim("No matches yet."))
+        else:
+            now = self._clock()
+            for row in self._matches:
+                self.matches_layout.addWidget(
+                    MatchCard(row, now, row.id in self._expanded, self._set_expanded))
+
+    def _set_expanded(self, match_id: str, expanded: bool):
+        (self._expanded.add if expanded else self._expanded.discard)(match_id)
+
+
+class MatchCard(QFrame):
+    """One match. Over NAMES_SHOWN players, the names line collapses to
+    "A, B, C, D +N more" and a chevron (or a click on the card) opens it."""
+
+    def __init__(self, row: MatchRow, now: float, expanded: bool, on_toggle):
+        super().__init__()
+        self.setObjectName("modRow")
+        self._row = row
+        self._expanded = expanded
+        self._on_toggle = on_toggle
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(2)
+        top = QHBoxLayout()
+        top.addWidget(_plain(row.title))
+        top.addStretch()
+        top.addWidget(_dim(f"{relative_time(row.created_at, now)} · {count_label(len(row.players))}"))
+        layout.addLayout(top)
+
+        self.names = _dim("")
+        self.names.setWordWrap(True)
+        self.expand_button: QPushButton | None = None
+        if row.players:
+            bottom = QHBoxLayout()
+            bottom.addWidget(self.names, 1)
+            if len(row.players) > NAMES_SHOWN:
+                self.expand_button = QPushButton()
+                self.expand_button.setObjectName("expandButton")
+                self.expand_button.setCursor(Qt.PointingHandCursor)
+                self.expand_button.clicked.connect(self.toggle)
+                self.setCursor(Qt.PointingHandCursor)
+                bottom.addWidget(self.expand_button, 0, Qt.AlignVCenter)
+            layout.addLayout(bottom)
+        self._show()
+
+    def toggle(self):
+        self._expanded = not self._expanded
+        self._on_toggle(self._row.id, self._expanded)
+        self._show()
+
+    def mousePressEvent(self, event):
+        if self.expand_button is not None:
+            self.toggle()
+            return
+        super().mousePressEvent(event)
+
+    def _show(self):
+        players = self._row.players
+        self.names.setText(", ".join(players) if self._expanded else player_line(players))
+        self.names.setVisible(bool(players))
+        if self.expand_button is not None:
+            icons.apply(self.expand_button, icons.COLLAPSE if self._expanded else icons.EXPAND,
+                        TEXT_DIM, 14)
+            self.expand_button.setToolTip("Show fewer" if self._expanded else "Show all players")
+
+
+def _plain(text: str) -> QLabel:
+    # Server text includes player-chosen Steam names: never let QLabel's
+    # AutoText read "<b>..." in one as markup.
+    label = QLabel(text)
+    label.setTextFormat(Qt.PlainText)
+    return label
+
+
+def _dim(text: str) -> QLabel:
+    label = _plain(text)
+    label.setObjectName("dim")
+    return label
+
+
+def _clear_layout(layout):
+    while layout.count():
+        widget = layout.takeAt(0).widget()
+        if widget is not None:
+            widget.setParent(None)  # gone now, not at the next event loop
+            widget.deleteLater()
+
+
+def _label_texts(layout) -> list[str]:
+    """Each row's text, for tests and debugging: a label, or a row's labels joined."""
+    texts = []
+    for i in range(layout.count()):
+        widget = layout.itemAt(i).widget()
+        if isinstance(widget, QLabel):
+            texts.append(widget.text())
+        elif widget is not None:
+            texts.append(" | ".join(label.text() for label in widget.findChildren(QLabel)))
+    return texts
 
 
 class ServerSection(Section):

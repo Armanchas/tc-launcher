@@ -35,7 +35,11 @@ LOG_FILE = "file-text"
 FOLDER = "folder-open"
 GITHUB = "github"
 DISCORD = "discord"
-NAMES = (COG, CLOSE, USER, WARNING, UPDATE, DOT, HEART, WEBSITE, LOG_FILE, FOLDER, GITHUB, DISCORD)
+REFRESH = "refresh-cw"
+EXPAND = "chevron-down"
+COLLAPSE = "chevron-up"
+NAMES = (COG, CLOSE, USER, WARNING, UPDATE, DOT, HEART, WEBSITE, LOG_FILE, FOLDER, GITHUB, DISCORD, REFRESH,
+         EXPAND, COLLAPSE)
 
 #: The team's logo: artwork, so not tinted and not in NAMES.
 LOGO = "tc-logo"

@@ -10,7 +10,7 @@ import pytest
 
 from tclauncher.config import GAME_EXE_RELPATH, ConfigManager
 from tclauncher.oidc import Protocol
-from tclauncher.ui import main_window
+from tclauncher.ui import main_window, settings_sections
 from tclauncher.ui.main_window import MainWindow, account_title
 
 
@@ -298,3 +298,22 @@ def test_game_logs_before_the_first_run_explains_itself(window, monkeypatch, tmp
     win.overlay.about.game_logs_button.click()
     assert opened == []
     assert len(told) == 1
+
+
+def test_online_chip_opens_online_section(window, monkeypatch):
+    fetched = []
+    monkeypatch.setattr(settings_sections, "run_worker", lambda fn, *a, **k: fetched.append(fn))
+    win = window()
+    win.config.server_discovery_addr = "http://server"
+    win.config.backend_data = {"backend_api": "http://server"}
+    win.chip_online.click()
+    assert win.overlay.current_section() == "online"
+    assert len(fetched) == 1  # through the patched worker: no real request
+
+
+def test_online_chip_without_a_server_opens_server(window):
+    win = window()
+    win.config.server_discovery_addr = None
+    win.config.backend_data = None
+    win.chip_online.click()
+    assert win.overlay.current_section() == "server"

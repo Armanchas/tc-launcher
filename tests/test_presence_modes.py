@@ -48,7 +48,7 @@ def test_default_loop_mode_still_reads_in_match():
 
 
 def test_going_dark_replaces_the_match_label():
-    assert _match("EVENTGOINGDARK").details == "Going Dark — Bright Sands"
+    assert _match("EVENTGOINGDARK").details == "Warden's Relics — Bright Sands"
 
 
 def test_low_gravity_and_quest_list():
